@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTPS-only network config. AutoEQ catalog/profiles are served over HTTPS from GitHub
+  (raw.githubusercontent.com); cleartext traffic is denied app-wide.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

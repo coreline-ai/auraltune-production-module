@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Launcher theme stub. Compose draws all UI; this only defines window chrome
+         before Compose attaches. Using android:Theme.Material.* avoids dragging in
+         AppCompat or MDC, which conflict with a pure Compose Material3 setup. -->
+    <style name="Theme.AuralTune" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar" tools:targetApi="m">true</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:colorBackground">@color/brand_background</item>
+    </style>
+</resources>

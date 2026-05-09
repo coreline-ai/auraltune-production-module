@@ -1,0 +1,257 @@
+# Phase 7 — Android CI workflow.
+#
+# IMPORTANT (P1-7): GitHub Actions only picks up workflows at the REPO ROOT
+# under `.github/workflows/`. This source-of-truth file lives at
+# `android-app/ci/android.yml`; the push script must copy it to the repo root
+# at `.github/workflows/android.yml` when syncing into
+# coreline-ai/auraltune-production-module. A workflow under `android-app/.github/`
+# would NOT run on GitHub.
+#
+# Gates per dev-plan:
+#   - Native host tests (AuralTuneEQEngine + GoldenResponse + ScipyLfilterIR) MUST pass.
+#   - All Kotlin unit tests across :audio-engine and :autoeq-data MUST pass.
+#   - Debug + Release APK builds MUST succeed (catches R8 / ProGuard regressions).
+#   - 16 KB page-size verification on the released arm64 .so (Android 15+).
+#
+# Instrumented tests (PD20 / Pixel emulator) are NOT in this workflow — they
+# require either device-farm credentials or a Google API emulator runner. Add
+# them in a separate workflow when the test farm is provisioned.
+name: android
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    name: Build, test, verify (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android-app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: ''   # specific packages installed below
+
+      - name: Install required SDK / NDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null
+          sdkmanager \
+            "platforms;android-34" \
+            "build-tools;34.0.0" \
+            "cmake;3.22.1" \
+            "ndk;27.0.12077973" \
+            "platform-tools" > /dev/null
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          cache-read-only: ${{ github.event_name == 'pull_request' }}
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Native host tests + scipy independent reference.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Set up Python (scipy reference)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install scipy / numpy for golden fixture verification
+        run: pip install --quiet "scipy>=1.10" "numpy>=1.24"
+
+      - name: Native host tests (AuralTuneEQEngineTest + GoldenResponseTest + Scipy*Tests)
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -fno-finite-math-only \
+              -I audio-engine/src/main/cpp \
+              audio-engine/src/test/cpp/AuralTuneEQEngineTest.cpp \
+              audio-engine/src/main/cpp/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              -o /tmp/run_native_tests
+          /tmp/run_native_tests
+
+          g++ -std=c++17 -O2 -fno-finite-math-only \
+              -I audio-engine/src/main/cpp \
+              audio-engine/src/test/cpp/GoldenResponseTest.cpp \
+              audio-engine/src/main/cpp/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              -o /tmp/run_golden
+          /tmp/run_golden
+
+          # P3-B: regenerate the scipy frequency-domain fixture fresh from
+          # CI's scipy install so a coefficient-math regression in our RBJ
+          # port is caught against an independent numerical reference.
+          python3 audio-engine/src/test/python/generate_golden.py \
+              > audio-engine/src/test/cpp/golden/hd600_oratory1990.json
+
+          g++ -std=c++17 -O2 -fno-finite-math-only \
+              -I audio-engine/src/main/cpp \
+              -DGOLDEN_FIXTURE_PATH="\"$(pwd)/audio-engine/src/test/cpp/golden/hd600_oratory1990.json\"" \
+              audio-engine/src/test/cpp/ScipyGoldenResponseTest.cpp \
+              audio-engine/src/main/cpp/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              -o /tmp/run_scipy_golden
+          /tmp/run_scipy_golden
+
+          # P2-2: TIME-DOMAIN independent reference (scipy.signal.lfilter,
+          # compiled native Direct Form II — completely independent from our
+          # TDF2 inner loop).
+          python3 audio-engine/src/test/python/generate_lfilter_ir.py \
+              > audio-engine/src/test/cpp/golden/hd600_lfilter_ir.bin
+
+          g++ -std=c++17 -O2 -fno-finite-math-only \
+              -I audio-engine/src/main/cpp \
+              -DLFILTER_IR_PATH="\"$(pwd)/audio-engine/src/test/cpp/golden/hd600_lfilter_ir.bin\"" \
+              audio-engine/src/test/cpp/ScipyLfilterIRTest.cpp \
+              audio-engine/src/main/cpp/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              -o /tmp/run_lfilter
+          /tmp/run_lfilter
+
+      # ────────────────────────────────────────────────────────────────────────
+      # P0-1 verification: snapshot publish race regression test, both with
+      # and without ThreadSanitizer. The original 4-slot pool implementation
+      # would surface non-finite samples / TSan races within a few thousand
+      # callbacks; the current heap+retire pattern survives 4000 callbacks
+      # × thousands of publishes per second cleanly.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Snapshot race stress (regular)
+        run: |
+          set -euo pipefail
+          g++ -std=c++17 -O2 -fno-finite-math-only -pthread \
+              -I audio-engine/src/main/cpp \
+              audio-engine/src/test/cpp/SnapshotRaceTest.cpp \
+              audio-engine/src/main/cpp/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              -o /tmp/run_race
+          /tmp/run_race
+
+      - name: Snapshot race stress (ThreadSanitizer)
+        run: |
+          set -euo pipefail
+          # TSan exposes data races even when the test's value-level checks
+          # would otherwise pass (i.e. compilers re-ordering benign-looking
+          # accesses in optimised builds). Failing this is a hard release
+          # blocker even if the regular run is clean.
+          clang++ -std=c++17 -O1 -g -fno-finite-math-only \
+                  -fsanitize=thread -pthread \
+                  -I audio-engine/src/main/cpp \
+                  audio-engine/src/test/cpp/SnapshotRaceTest.cpp \
+                  audio-engine/src/main/cpp/BiquadFilter.cpp \
+                  audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+                  -o /tmp/run_race_tsan
+          # TSan exits 66 on detected race regardless of test's own assertion
+          # status. We treat ANY non-zero exit as failure.
+          /tmp/run_race_tsan
+
+      # ────────────────────────────────────────────────────────────────────────
+      # P1-8: enforce that release CMake flags do NOT enable optimizations
+      # that dead-code our NaN guard. We must skip comments / strings that
+      # MENTION the forbidden flags — only flag actual cppFlags / arguments
+      # that ENABLE them.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Forbid -Ofast / -ffast-math / -ffinite-math-only (active flags)
+        run: |
+          set -euo pipefail
+          # Match flags ONLY when they appear inside a quoted string (which is
+          # how cppFlags / cmake arguments / linker flags are passed). This
+          # excludes // and # comment lines that merely mention the flag name.
+          # Strip C++ // and # comment lines first.
+          MATCHES=$(grep -RIn --include='*.cpp' --include='*.h' --include='*.cmake' \
+                          --include='CMakeLists.txt' --include='*.gradle.kts' \
+                          -E '"[^"]*(-Ofast|-ffast-math|-ffinite-math-only)' \
+                          audio-engine/ \
+                       | grep -vE '^[[:space:]]*//' \
+                       | grep -vE '^[[:space:]]*#' \
+                       || true)
+          # Whitelist: we DO use -fno-finite-math-only intentionally; that's
+          # the negative form and is exactly what we want.
+          MATCHES=$(echo "$MATCHES" | grep -vE '\-fno-finite-math-only' || true)
+          if [ -n "$MATCHES" ]; then
+            echo "::error::Forbidden compiler flag detected — NaN guard would be dead-coded:"
+            echo "$MATCHES"
+            exit 1
+          fi
+          echo "OK: no forbidden flags active"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Phase 3 / Phase 4: Kotlin unit tests.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Kotlin unit tests (:autoeq-data)
+        run: ./gradlew :autoeq-data:testDebugUnitTest
+
+      - name: Kotlin unit tests (:audio-engine, :app)
+        run: ./gradlew :audio-engine:testDebugUnitTest :app:testDebugUnitTest
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Phase 0 / Phase 7: build gate. R8 must succeed. APKs must produce.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug
+
+      - name: Assemble release APK (R8 / minify)
+        run: ./gradlew :app:assembleRelease
+
+      # ────────────────────────────────────────────────────────────────────────
+      # Phase 0 P0-4: 16 KB page-size verification on the release arm64-v8a .so.
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Verify 16 KB page-size alignment
+        run: |
+          set -euo pipefail
+          NDK_HOST=$ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64
+          READELF=$NDK_HOST/bin/llvm-readelf
+          SO=$(find app/build/intermediates \
+            -path '*/merged_native_libs/release/*/out/lib/arm64-v8a/libauraltune_audio.so' \
+            | head -1)
+          if [ -z "$SO" ]; then
+            echo "::error::release arm64-v8a libauraltune_audio.so not found"
+            exit 1
+          fi
+          echo "Inspecting: $SO"
+          aligns=$("$READELF" -l "$SO" | awk '/LOAD/ {print $NF}' | sort -u)
+          echo "Observed LOAD aligns: $aligns"
+          if echo "$aligns" | grep -vq '^0x4000$'; then
+            echo "::error::Expected all LOAD segments aligned to 0x4000 (16 KB), got: $aligns"
+            exit 1
+          fi
+          echo "OK: 16 KB page-size compliant"
+
+      - name: Upload debug APK artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android-app/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload release APK artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: android-app/app/build/outputs/apk/release/app-release-unsigned.apk
+          if-no-files-found: error

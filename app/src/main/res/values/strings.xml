@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AuralTune</string>
+
+    <!-- Catalog state -->
+    <string name="catalog_loading">Loading headphone catalog…</string>
+    <string name="catalog_offline">Offline — using cached catalog</string>
+    <string name="catalog_stale_format">Last updated %s ago</string>
+
+    <!-- Search -->
+    <string name="search_placeholder">Search headphones…</string>
+    <string name="no_results">No headphones found</string>
+
+    <!-- Status card -->
+    <string name="no_correction_active">No correction active</string>
+    <string name="import_button">Import ParametricEQ.txt</string>
+    <string name="correction_toggle">AutoEQ correction</string>
+    <string name="preamp_toggle">AutoEQ preamp</string>
+    <string name="clear_selection">Clear selection</string>
+    <string name="favorite_toggle">Favorite</string>
+
+    <!-- Diagnostics card -->
+    <string name="diagnostics_title">Diagnostics</string>
+    <string name="diagnostics_xrun">xrun count</string>
+    <string name="diagnostics_non_finite">non-finite reset count</string>
+    <string name="diagnostics_config_swap">config swap count</string>
+    <string name="diagnostics_sample_rate">sample-rate change count</string>
+
+    <!-- Test tone -->
+    <string name="test_tone_label">Test tone</string>
+    <string name="test_tone_on">ON</string>
+    <string name="test_tone_off">OFF</string>
+
+    <!-- Cache -->
+    <string name="clear_cache">Clear cache</string>
+    <string name="clear_cache_button">Clear cache</string>
+
+    <!-- Diagnostics extras (P3-C) -->
+    <string name="diagnostics_device">device</string>
+    <string name="diagnostics_sample_rate_now">current sample rate</string>
+    <string name="diagnostics_total_frames">total processed frames</string>
+    <string name="diagnostics_no_device">— no eligible device —</string>
+
+    <!-- Kill switch (P2-E) -->
+    <string name="kill_switch_label">Kill switch</string>
+    <string name="kill_switch_hint">Bypass all DSP — engine becomes pure passthrough</string>
+
+    <!-- Attribution (Phase 7 release task) -->
+    <string name="autoeq_attribution">Headphone correction profiles courtesy of Jaakko Pasanen\'s AutoEq project (MIT License)</string>
+</resources>
