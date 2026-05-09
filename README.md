@@ -413,6 +413,6 @@ Headphone correction profiles courtesy of Jaakko Pasanen's [AutoEq project](http
 
 <div align="center">
 
-Made with ⚡ by **Coreline** · Powered by **RBJ Audio EQ Cookbook**
+Made with ⚡ by **Coreline**
 
 </div>
