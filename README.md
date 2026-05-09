@@ -401,6 +401,18 @@ For teams source-vendoring `:audio-engine` and / or `:autoeq-data`:
 
 ---
 
-## 📜 Attribution
+## 📜 License
+
+본 프로젝트의 라이선스는 **별도 협의** — 사용 전 [coreline-ai](https://github.com/coreline-ai)에 문의해 주세요.
+
+### Third-party attribution
 
 Headphone correction profiles courtesy of Jaakko Pasanen's [AutoEq project](https://github.com/jaakkopasanen/AutoEq) (MIT License).
+
+---
+
+<div align="center">
+
+Made with ⚡ by **Coreline** · Powered by **RBJ Audio EQ Cookbook**
+
+</div>
