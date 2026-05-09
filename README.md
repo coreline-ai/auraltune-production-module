@@ -2,6 +2,8 @@
 
 # 🎧 AuralTune Android
 
+<img width="2752" height="1536" alt="AuralTune 앱 주요 기능 소개" src="https://github.com/user-attachments/assets/90dc5e5f-ec9f-45d9-8715-e7fc0a93c015" /><br>
+
 **Production-grade AutoEQ headphone correction for Android**
 
 [![minSdk](https://img.shields.io/badge/minSdk-26%2B-3DDC84?style=flat-square&logo=android&logoColor=white)](#-build-matrix)
