@@ -262,6 +262,62 @@ Java_com_coreline_audio_AudioEngine_nativeSetAutoEqPreampEnabled(JNIEnv* /*env*/
 }
 
 // ---------------------------------------------------------------------------
+// Stage C: Loudness Compensation (ISO 226:2023) — JNI methods
+// ---------------------------------------------------------------------------
+
+JNIEXPORT void JNICALL
+Java_com_coreline_audio_AudioEngine_nativeSetLoudnessCompensationEnabled(JNIEnv* /*env*/,
+                                                                          jobject /*thiz*/,
+                                                                          jlong handle,
+                                                                          jboolean enabled) {
+    auto* engine = fromHandle(handle);
+    if (engine != nullptr) engine->setLoudnessCompensationEnabled(enabled == JNI_TRUE);
+}
+
+JNIEXPORT jint JNICALL
+Java_com_coreline_audio_AudioEngine_nativeSetLoudnessCompensationVolume(JNIEnv* /*env*/,
+                                                                         jobject /*thiz*/,
+                                                                         jlong handle,
+                                                                         jfloat systemVolume) {
+    auto* engine = fromHandle(handle);
+    if (engine == nullptr) return -1;
+    return engine->setLoudnessCompensationVolume(systemVolume);
+}
+
+// ---------------------------------------------------------------------------
+// Stage D: Loudness Equalizer (BS.1770 auto-leveler) — JNI methods
+// ---------------------------------------------------------------------------
+
+JNIEXPORT void JNICALL
+Java_com_coreline_audio_AudioEngine_nativeSetLoudnessEqEnabled(JNIEnv* /*env*/,
+                                                                jobject /*thiz*/,
+                                                                jlong handle,
+                                                                jboolean enabled) {
+    auto* engine = fromHandle(handle);
+    if (engine != nullptr) engine->setLoudnessEqEnabled(enabled == JNI_TRUE);
+}
+
+JNIEXPORT void JNICALL
+Java_com_coreline_audio_AudioEngine_nativeUpdateLoudnessEqSettings(JNIEnv* /*env*/,
+                                                                    jobject /*thiz*/,
+                                                                    jlong handle,
+                                                                    jfloat targetLoudnessDb,
+                                                                    jfloat maxBoostDb,
+                                                                    jfloat maxCutDb,
+                                                                    jfloat compressionThresholdOffsetDb,
+                                                                    jfloat compressionRatio,
+                                                                    jfloat compressionKneeDb,
+                                                                    jfloat gainAttackMs,
+                                                                    jfloat gainReleaseMs) {
+    auto* engine = fromHandle(handle);
+    if (engine == nullptr) return;
+    engine->updateLoudnessEqSettings(targetLoudnessDb, maxBoostDb, maxCutDb,
+                                     compressionThresholdOffsetDb,
+                                     compressionRatio, compressionKneeDb,
+                                     gainAttackMs, gainReleaseMs);
+}
+
+// ---------------------------------------------------------------------------
 // nativeUpdateSampleRate
 // ---------------------------------------------------------------------------
 

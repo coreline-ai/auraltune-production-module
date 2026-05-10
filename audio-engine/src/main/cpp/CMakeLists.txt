@@ -23,6 +23,13 @@ add_library(auraltune_audio SHARED
     BiquadFilter.cpp
     AuralTuneEQEngine.cpp
     AudioEngineJNI.cpp
+    # Stage C: ISO 226:2023 Loudness Compensation
+    loudness/IsoContours.cpp
+    loudness/LoudnessCompensator.cpp
+    # Stage D: BS.1770 Auto-Leveler (KWeighting + Detector + GainComputer +
+    # GainSmoother + LoudnessEqualizer). Detector/GainComputer/GainSmoother/
+    # LoudnessEqualizer are header-only (templates of inline math).
+    loudness/KWeightingFilter.cpp
 )
 
 target_compile_options(auraltune_audio PRIVATE ${NATIVE_COMMON_FLAGS})

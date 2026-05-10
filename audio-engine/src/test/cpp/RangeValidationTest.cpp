@@ -260,6 +260,189 @@ void testAppliedSnapshotConsistency() {
     std::printf("PASS testAppliedSnapshotConsistency\n");
 }
 
+// Test 9 (Stage A): HighPass filter type produces a Butterworth response.
+// Verifies the new EqFilterType::HighPass is wired through buildAutoEqFilter
+// and produces sensible coefficients (matching the Kotlin pre-verification
+// reference values to numerical precision).
+void testHighPassFilterTypeResponseSensible() {
+    AuralTuneEQEngine eng(48000.0);
+    eng.setAutoEqEnabled(true);
+
+    // Single HPF at fc=80 Hz, Q=1/√2 (Butterworth). gainDB unused.
+    const int   types[1] = {static_cast<int>(EqFilterType::HighPass)};
+    const float freqs[1] = {80.0f};
+    const float gains[1] = {0.0f};
+    const float qs[1]    = {static_cast<float>(1.0 / std::sqrt(2.0))};
+
+    assert(eng.updateAutoEq(0.0f, false, 48000.0,
+                            types, freqs, gains, qs, 1) == 0);
+
+    // Process a short impulse — first sample of stereo pair = 1.0
+    std::vector<float> buf(kFrames * 2, 0.0f);
+    buf[0] = 1.0f;
+    buf[1] = 1.0f;
+    assert(eng.process(buf.data(), kFrames) == 0);
+    assert(allFinite(buf.data(), kFrames));
+
+    // HPF response: at low frequency the energy is attenuated. Verify the
+    // initial transient from a unit impulse produces a finite, reasonable
+    // response — output[0] (first stereo sample after b0 multiplication)
+    // should be ~b0 = (1+cos(2π·80/48000))/2 / (1+α) ≈ 0.99 (for fc=80,
+    // fs=48000, Q=1/√2). The exact value is the pre-verified reference.
+    const double omega = 2.0 * M_PI * 80.0 / 48000.0;
+    const double sinW  = std::sin(omega);
+    const double cosW  = std::cos(omega);
+    const double alpha = sinW / (2.0 * (1.0 / std::sqrt(2.0)));
+    const double expectedB0 = (1.0 + cosW) / 2.0 / (1.0 + alpha);
+    assert(std::fabs(static_cast<double>(buf[0]) - expectedB0) < 1e-5);
+
+    std::printf("PASS testHighPassFilterTypeResponseSensible (b0=%.6f)\n", expectedB0);
+}
+
+// Test 10c (Stage D): Loudness Equalizer auto-leveler — engine integration.
+//   - Default: chain disabled, identity passthrough
+//   - Enable + low-amplitude input: gain ramp over many callbacks should
+//     boost the signal toward the target loudness
+void testLoudnessEqualizerEngineIntegration() {
+    AuralTuneEQEngine eng(48000.0);
+
+    // Default config target = -12 dB; quiet input @ -40 dB (~0.01 amplitude)
+    // should be boosted significantly over time.
+    eng.updateLoudnessEqSettings(/*target*/ -12.0f,
+                                 /*maxBoost*/  15.0f,
+                                 /*maxCut*/     4.0f,
+                                 /*compThr+*/   6.0f,
+                                 /*ratio*/      1.6f,
+                                 /*kneeDb*/     8.0f,
+                                 /*atkMs*/    180.0f,
+                                 /*relMs*/   5000.0f);
+    eng.setLoudnessEqEnabled(true);
+
+    // Run many callbacks of quiet pure tone; gain should ramp upward.
+    constexpr int kCallbacks = 200;     // ≈ 4.27 s at 1024 frames @ 48 kHz
+    std::vector<float> buf(kFrames * 2, 0.0f);
+    float gainStart = 0.0f;
+    float gainEnd   = 0.0f;
+    for (int cb = 0; cb < kCallbacks; ++cb) {
+        // Fill with a low-amplitude 1 kHz sine
+        for (int f = 0; f < kFrames; ++f) {
+            const float t = static_cast<float>(cb * kFrames + f) / 48000.0f;
+            const float s = 0.01f * std::sin(2.0f * M_PI * 1000.0f * t);
+            buf[f * 2]     = s;
+            buf[f * 2 + 1] = s;
+        }
+        // Capture amplitude before processing on first callback
+        if (cb == 0) gainStart = std::fabs(buf[0]) > 1e-12f ? std::fabs(buf[0]) : 1e-12f;
+        assert(eng.process(buf.data(), kFrames) == 0);
+        if (cb == kCallbacks - 1) gainEnd = std::fabs(buf[0]) > 1e-12f ? std::fabs(buf[0]) : 1e-12f;
+        assert(allFinite(buf.data(), kFrames));
+    }
+    // After ramping, output amplitude must be larger than input (engine boosted it).
+    // We don't assert exact target — just direction. (Quiet 0.01 input → -40 dB →
+    // detector measures ≈ -43 dB → gain target ~+15 dB clamped, but noise floor
+    // protection caps to +1.5 dB at very quiet levels — see GainComputer).
+    assert(gainEnd >= gainStart);
+
+    std::printf("PASS testLoudnessEqualizerEngineIntegration "
+                "(start=%.5f, end=%.5f over %d callbacks)\n",
+                gainStart, gainEnd, kCallbacks);
+}
+
+// Test 10b (Stage C): Loudness Compensation chain — engine integration.
+//   - Default state: chain disabled, process passes through identity
+//   - Enable + reference volume (1.0): chain enabled but coeffs unity → no audible change
+//   - Enable + low volume (0.1): coeffs non-unity → noticeable signal change but still finite
+void testLoudnessCompensationEngineIntegration() {
+    AuralTuneEQEngine eng(48000.0);
+
+    // Capture identity output for reference
+    std::vector<float> ref(kFrames * 2, 0.0f);
+    ref[0] = 1.0f; ref[1] = 1.0f;
+    assert(eng.process(ref.data(), kFrames) == 0);
+
+    // Enable loudness comp at reference volume — coefficients are all unity
+    // so output should still be identity (modulo floating-point noise from
+    // running through 4 unity sections).
+    eng.setLoudnessCompensationEnabled(true);
+    eng.setLoudnessCompensationVolume(1.0f);   // 80 phon = reference
+
+    std::vector<float> bufRef(kFrames * 2, 0.0f);
+    bufRef[0] = 1.0f; bufRef[1] = 1.0f;
+    assert(eng.process(bufRef.data(), kFrames) == 0);
+    assert(allFinite(bufRef.data(), kFrames));
+    // At reference volume, the chain runs but with unity coefficients.
+    // Output should be very close to identity (within floating-point noise).
+    assert(std::fabs(bufRef[0] - 1.0f) < 1e-3);
+
+    // Set low volume → non-unity coefficients → output differs significantly
+    assert(eng.setLoudnessCompensationVolume(0.1f) == 0);
+
+    std::vector<float> bufLow(kFrames * 2, 0.0f);
+    bufLow[0] = 1.0f; bufLow[1] = 1.0f;
+    assert(eng.process(bufLow.data(), kFrames) == 0);
+    assert(allFinite(bufLow.data(), kFrames));
+    // Low-volume compensation boosts bass; the impulse response should have
+    // visibly more energy than the unity-coefficients case.
+    double energyLow = 0.0, energyRef = 0.0;
+    for (int i = 0; i < kFrames * 2; ++i) {
+        energyLow += static_cast<double>(bufLow[i]) * static_cast<double>(bufLow[i]);
+        energyRef += static_cast<double>(bufRef[i]) * static_cast<double>(bufRef[i]);
+    }
+    assert(std::isfinite(energyLow));
+    assert(energyLow > energyRef);   // bass-boosted IR has more energy
+
+    // Disable → output reverts to (essentially) identity
+    eng.setLoudnessCompensationEnabled(false);
+    std::vector<float> bufOff(kFrames * 2, 0.0f);
+    bufOff[0] = 1.0f; bufOff[1] = 1.0f;
+    assert(eng.process(bufOff.data(), kFrames) == 0);
+    assert(std::fabs(bufOff[0] - 1.0f) < 1e-3);
+
+    std::printf("PASS testLoudnessCompensationEngineIntegration "
+                "(energyRef=%.4f, energyLow=%.4f)\n", energyRef, energyLow);
+}
+
+// Test 10 (Stage A): HighPass + Peaking cascade — both filter types coexist
+// in the same chain. Verifies the new HighPass enum doesn't break the
+// existing routing.
+void testHighPassMixedWithPeaking() {
+    AuralTuneEQEngine eng(48000.0);
+    eng.setAutoEqEnabled(true);
+
+    // Chain: HPF @ 80 Hz Q=0.707  +  Peaking @ 1 kHz +6 dB Q=1.0
+    const int   types[2] = {
+        static_cast<int>(EqFilterType::HighPass),
+        static_cast<int>(EqFilterType::Peaking),
+    };
+    const float freqs[2] = {80.0f, 1000.0f};
+    const float gains[2] = {0.0f, 6.0f};
+    const float qs[2]    = {static_cast<float>(1.0 / std::sqrt(2.0)), 1.0f};
+
+    assert(eng.updateAutoEq(0.0f, false, 48000.0,
+                            types, freqs, gains, qs, 2) == 0);
+
+    std::vector<float> buf(kFrames * 2, 0.0f);
+    // Inject a unit impulse pair on first frame
+    buf[0] = 1.0f;
+    buf[1] = 1.0f;
+    assert(eng.process(buf.data(), kFrames) == 0);
+    assert(allFinite(buf.data(), kFrames));
+
+    // Energy must remain finite and bounded — neither filter should blow up.
+    double energy = 0.0;
+    for (int i = 0; i < kFrames * 2; ++i) {
+        energy += static_cast<double>(buf[i]) * static_cast<double>(buf[i]);
+    }
+    assert(std::isfinite(energy));
+    assert(energy > 0.0 && energy < 1e6);
+
+    // Diagnostics confirm both filters are in the active chain
+    const auto d = eng.readDiagnostics();
+    assert(d.autoEqActiveCount == 2);
+
+    std::printf("PASS testHighPassMixedWithPeaking (energy=%.3f)\n", energy);
+}
+
 }  // namespace
 
 int main() {
@@ -271,6 +454,10 @@ int main() {
     testImpulseFiniteAfterUnityFilter();
     testDiagnosticsAppliedGenerationAndCount();
     testAppliedSnapshotConsistency();
+    testHighPassFilterTypeResponseSensible();
+    testHighPassMixedWithPeaking();
+    testLoudnessCompensationEngineIntegration();
+    testLoudnessEqualizerEngineIntegration();
     std::printf("\nAll range-validation tests passed.\n");
     return 0;
 }

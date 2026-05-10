@@ -147,6 +147,97 @@ class AudioEngine(sampleRate: Int) : Closeable {
     }
 
     /**
+     * Stage C: enable / disable the ISO 226:2023 Loudness Compensation
+     * chain stage. When enabled and [setLoudnessCompensationVolume] has
+     * been called with a non-reference volume, the engine applies a
+     * frequency-dependent gain (4-section RBJ cascade) that boosts bass
+     * and high treble to compensate for the ear's reduced sensitivity at
+     * lower listening levels (ISO 226 / Fletcher-Munson).
+     *
+     * Cascade order in [process]:
+     *   manual → autoEqPreamp → autoEq → loudnessComp → softLimiter
+     *
+     * No-op if state already matches.
+     */
+    fun setLoudnessCompensationEnabled(enabled: Boolean) {
+        require(handle != 0L) { "AudioEngine is closed" }
+        nativeSetLoudnessCompensationEnabled(handle, enabled)
+    }
+
+    /**
+     * Stage C: update the loudness compensation curve for a new system
+     * volume (`AudioManager.STREAM_MUSIC` 0..1 normalized). 1.0 maps to
+     * 80 phon (reference; cascade collapses to unity bypass). 0.0 maps
+     * to 20 phon (heaviest compensation).
+     *
+     * Phon delta < 1.0 from the previously applied phon is coalesced
+     * (no native publish) when the chain is currently enabled — avoids
+     * snapshot churn during volume slider drags.
+     *
+     * @throws IllegalStateException on internal native rejection (NaN volume).
+     */
+    fun setLoudnessCompensationVolume(systemVolume: Float) {
+        require(handle != 0L) { "AudioEngine is closed" }
+        require(systemVolume.isFinite()) {
+            "systemVolume must be finite, got $systemVolume"
+        }
+        val status = nativeSetLoudnessCompensationVolume(handle, systemVolume)
+        check(status == 0) {
+            "nativeSetLoudnessCompensationVolume rejected " +
+                "systemVolume=$systemVolume (status=$status)"
+        }
+    }
+
+    /**
+     * Stage D: enable/disable the BS.1770 auto-leveler chain stage.
+     *
+     * When enabled, the engine continuously measures perceived loudness
+     * (K-weighted RMS) and applies a slow gain envelope to keep the
+     * output near `targetLoudnessDb`. Quiet material is boosted (capped
+     * at `maxBoostDb`); loud peaks pass through a soft-knee compressor.
+     *
+     * Cascade order:
+     *   manual → autoEqPreamp → autoEq → loudnessComp → loudnessEq → softLimiter
+     *
+     * Disable is a fast snapshot flip — the underlying processor is kept
+     * alive so re-enabling preserves its state (avoids click on toggle).
+     */
+    fun setLoudnessEqEnabled(enabled: Boolean) {
+        require(handle != 0L) { "AudioEngine is closed" }
+        nativeSetLoudnessEqEnabled(handle, enabled)
+    }
+
+    /**
+     * Stage D: update auto-leveler configuration. Each call allocates a
+     * fresh native processor; the previous one is retired with the
+     * standard 500 ms grace (audio thread can finish its current callback).
+     *
+     * Defaults match macOS reference values:
+     *   target=-12 dB, maxBoost=+15 dB, maxCut=-4 dB,
+     *   compressionRatio=1.6, kneeDb=8, attack=180 ms, release=5000 ms.
+     */
+    fun updateLoudnessEqSettings(
+        targetLoudnessDb: Float = -12f,
+        maxBoostDb: Float = 15f,
+        maxCutDb: Float = 4f,
+        compressionThresholdOffsetDb: Float = 6f,
+        compressionRatio: Float = 1.6f,
+        compressionKneeDb: Float = 8f,
+        gainAttackMs: Float = 180f,
+        gainReleaseMs: Float = 5000f,
+    ) {
+        require(handle != 0L) { "AudioEngine is closed" }
+        require(maxBoostDb >= 0f && maxCutDb >= 0f) { "boost/cut must be non-negative" }
+        require(compressionRatio >= 1.0f) { "compressionRatio must be ≥ 1" }
+        require(gainAttackMs > 0f && gainReleaseMs > 0f) { "attack/release ms must be > 0" }
+        nativeUpdateLoudnessEqSettings(
+            handle, targetLoudnessDb, maxBoostDb, maxCutDb,
+            compressionThresholdOffsetDb, compressionRatio, compressionKneeDb,
+            gainAttackMs, gainReleaseMs,
+        )
+    }
+
+    /**
      * Notify the engine that the device sample rate has changed.
      * Triggers full coefficient recomputation with pre-warp + delay buffer reset.
      *
@@ -446,6 +537,22 @@ class AudioEngine(sampleRate: Int) : Closeable {
     private external fun nativeSetAutoEqEnabled(handle: Long, enabled: Boolean)
     private external fun nativeSetManualEqEnabled(handle: Long, enabled: Boolean)
     private external fun nativeSetAutoEqPreampEnabled(handle: Long, enabled: Boolean)
+    // Stage C: Loudness Compensation (ISO 226:2023)
+    private external fun nativeSetLoudnessCompensationEnabled(handle: Long, enabled: Boolean)
+    private external fun nativeSetLoudnessCompensationVolume(handle: Long, systemVolume: Float): Int
+    // Stage D: BS.1770 Loudness Equalizer (auto-leveler)
+    private external fun nativeSetLoudnessEqEnabled(handle: Long, enabled: Boolean)
+    private external fun nativeUpdateLoudnessEqSettings(
+        handle: Long,
+        targetLoudnessDb: Float,
+        maxBoostDb: Float,
+        maxCutDb: Float,
+        compressionThresholdOffsetDb: Float,
+        compressionRatio: Float,
+        compressionKneeDb: Float,
+        gainAttackMs: Float,
+        gainReleaseMs: Float,
+    )
     private external fun nativeUpdateSampleRate(handle: Long, newRate: Int): Int
     private external fun nativeProcessDirectBuffer(handle: Long, buffer: ByteBuffer, numFrames: Int): Int
     private external fun nativeGetDiagnostics(handle: Long): LongArray

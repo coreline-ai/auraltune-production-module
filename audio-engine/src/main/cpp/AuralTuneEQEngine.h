@@ -45,20 +45,27 @@
 #include <vector>
 
 #include "BiquadFilter.h"
+#include "loudness/LoudnessEqualizerSettings.h"
 
 namespace auraltune::audio {
+
+class LoudnessEqualizer;   // forward decl — defined in loudness/LoudnessEqualizer.h
 
 // Filter type enum exposed across JNI. Values match Kotlin EqFilterType.nativeId.
 enum class EqFilterType : int {
     Peaking   = 0,
     LowShelf  = 1,
     HighShelf = 2,
+    HighPass  = 3,   // 2nd-order RBJ Butterworth HPF — `gainDB` is ignored
 };
 
 class AuralTuneEQEngine {
 public:
     static constexpr int kMaxAutoEqFilters = 10;
     static constexpr int kMaxManualFilters = 20;
+    // Loudness Compensation chain — fixed 4-section topology (low shelf 80 Hz,
+    // peaking 180 Hz, peaking 3.2 kHz, high shelf 10 kHz). See LoudnessCompensator.h.
+    static constexpr int kLoudnessCompSections = 4;
     static constexpr double kDefaultProfileOptimizedRate = 48000.0;
 
     // Validation bounds — used by both updateAutoEq and updateManualEq.
@@ -115,6 +122,53 @@ public:
     void setManualEqEnabled(bool e);
     void setAutoEqPreampEnabled(bool e);
 
+    // ---- Loudness Compensation (ISO 226:2023) ----
+    //
+    // Enables/disables the 4-section ISO 226 equal-loudness compensation
+    // chain stage. When enabled and `setLoudnessCompensationVolume` has
+    // been called with a non-reference volume, the engine applies a
+    // frequency-dependent gain that boosts bass and high treble to
+    // compensate for the ear's reduced sensitivity at lower listening
+    // levels (Fletcher-Munson / ISO 226).
+    void setLoudnessCompensationEnabled(bool e);
+
+    // Update the compensation curve for a new system volume (0.0..1.0).
+    // 1.0 maps to 80 phon (reference; cascade collapses to unity bypass).
+    // 0.0 maps to 20 phon (heaviest compensation).
+    //
+    // No-op coalescing: if the requested phon differs by less than 1.0
+    // from the last applied phon AND the chain is currently enabled, the
+    // call is skipped (avoid redundant snapshot publishes during slider
+    // drags).
+    //
+    // Returns 0 on success, -1 on numeric validation failure (NaN volume).
+    int setLoudnessCompensationVolume(float systemVolume0to1);
+
+    // ---- Loudness Equalizer (BS.1770 auto-leveler) ----
+    //
+    // Enables/disables the K-weighted auto-leveler chain stage. When
+    // enabled, the engine continuously measures perceived loudness and
+    // applies a slow gain envelope to keep the output near a target level
+    // (default -12 dB). Quiet material is boosted (up to +15 dB), loud
+    // peaks pass through a soft-knee compressor (default ratio 1.6).
+    //
+    // Settings are applied at the next snapshot publish. To customize
+    // behavior, call `updateLoudnessEqSettings(...)` before enabling.
+    void setLoudnessEqEnabled(bool e);
+
+    // Update the auto-leveler configuration. The new instance replaces the
+    // active one via the engine's snapshot publish + retire pattern. If the
+    // chain is currently enabled the new instance starts processing at the
+    // next callback; otherwise it sits idle until enabled.
+    void updateLoudnessEqSettings(float targetLoudnessDb,
+                                  float maxBoostDb,
+                                  float maxCutDb,
+                                  float compressionThresholdOffsetDb,
+                                  float compressionRatio,
+                                  float compressionKneeDb,
+                                  float gainAttackMs,
+                                  float gainReleaseMs);
+
     void updateSampleRate(int newRate);
 
     // ---- Audio thread ----
@@ -165,6 +219,19 @@ public:
     };
     AppliedSnapshot readAppliedSnapshot() const noexcept;
 
+    // ─── Public RBJ coefficient builders ─────────────────────────────────
+    //
+    // Stateless helpers — exposed for unit tests and for sibling DSP modules
+    // (e.g. LoudnessCompensator, KWeightingFilter) that build cascades from
+    // the same RBJ Audio EQ Cookbook formulae. Moving these to public has no
+    // encapsulation impact since they neither read nor write engine state.
+    static BiquadCoeffs peakingCoeffs(double freq, float gainDB, double q, double sampleRate);
+    static BiquadCoeffs lowShelfCoeffs(double freq, float gainDB, double q, double sampleRate);
+    static BiquadCoeffs highShelfCoeffs(double freq, float gainDB, double q, double sampleRate);
+    // RBJ Audio EQ Cookbook — 2nd-order high-pass biquad. `gainDB` is unused
+    // (parameterless filter; pass 0.0f). Q=1/√2 = Butterworth response.
+    static BiquadCoeffs highPassCoeffs(double freq, double q, double sampleRate);
+
 private:
     // Whole-config snapshot. Populated by control thread, read once per
     // callback by audio thread. POD layout — no pointers.
@@ -180,10 +247,11 @@ private:
         bool requestDelayReset = false;
 
         // Enable / control flags.
-        bool manualOn  = false;
-        bool autoOn    = false;
-        bool preampOn  = true;
-        bool limiterOn = false;
+        bool manualOn       = false;
+        bool autoOn         = false;
+        bool preampOn       = true;
+        bool limiterOn      = false;
+        bool loudnessCompOn = false;     // Stage C: ISO 226 compensation toggle
 
         // Cascade lengths (0..max).
         int manualCount = 0;
@@ -192,9 +260,19 @@ private:
         // Linear preamp gain (already converted from dB).
         float autoEqPreampLinear = 1.0f;
 
+        // Stage D: BS.1770 auto-leveler enable flag. The actual processor
+        // instance lives in `activeLoudnessEq_` (separate atomic) because it
+        // owns rich state (RMS ring buffer, envelope smoothers) that doesn't
+        // belong inside a POD snapshot. The bool here tells the audio thread
+        // whether to dereference the LE pointer at all.
+        bool loudnessEqOn = false;
+
         // Coefficients. Fixed-size arrays — POD.
         BiquadCoeffs manualCoeffs[kMaxManualFilters];
         BiquadCoeffs autoEqCoeffs[kMaxAutoEqFilters];
+        // Stage C: ISO 226 compensation cascade — always 4 sections, unity
+        // when at reference phon (volume = 1.0) so chain runs free of cost.
+        BiquadCoeffs loudnessCompCoeffs[kLoudnessCompSections];
     };
 
     // Heap-allocate a new snapshot, copy-initialized from the currently
@@ -217,11 +295,6 @@ private:
     // Numeric validation helpers (control thread).
     static bool isFiniteFloat(float v) noexcept;
     static bool isFiniteDouble(double v) noexcept;
-
-    // Coefficient builders (control thread).
-    static BiquadCoeffs peakingCoeffs(double freq, float gainDB, double q, double sampleRate);
-    static BiquadCoeffs lowShelfCoeffs(double freq, float gainDB, double q, double sampleRate);
-    static BiquadCoeffs highShelfCoeffs(double freq, float gainDB, double q, double sampleRate);
 
     // Pre-warp digital frequency from sourceRate to targetRate via inverse +
     // forward bilinear. Verbatim port of BiquadMath.preWarpFrequency.
@@ -263,6 +336,15 @@ private:
     int autoEqActiveCount_ = 0;
     float autoEqPreampDB_ = 0.0f;
 
+    // Stage C: Loudness Compensation cached state — used to recompute
+    // coefficients on sample-rate change and to coalesce no-op volume updates.
+    bool   loudnessCompEnabled_ = false;
+    double loudnessCompPhon_    = 80.0;   // 80 phon = unity bypass (reference)
+
+    // Stage D: BS.1770 auto-leveler — cached settings. The actual instance
+    // is heap-allocated in `activeLoudnessEq_` (own retire queue).
+    LoudnessEqualizerSettings loudnessEqSettings_{};
+
     // Lock that serializes control-thread updates (snapshot writer side).
     // Audio thread NEVER takes this lock.
     mutable std::mutex updateMutex_;
@@ -287,6 +369,19 @@ private:
     // ---- Audio-thread-owned biquad state ----
     std::array<BiquadFilter, kMaxManualFilters> manualChain_{};
     std::array<BiquadFilter, kMaxAutoEqFilters> autoEqChain_{};
+    // Stage C: ISO 226 compensation chain — 4 fixed biquads.
+    std::array<BiquadFilter, kLoudnessCompSections> loudnessCompChain_{};
+    // Stage D: BS.1770 auto-leveler instance. Heap-allocated, atomic-published
+    // independently of EngineSnapshot. Audio thread loads once per callback.
+    std::atomic<LoudnessEqualizer*> activeLoudnessEq_{nullptr};
+    // Retire queue for old LE instances — same grace pattern as EngineSnapshot.
+    struct LoudnessEqRetireEntry {
+        LoudnessEqualizer* ptr;
+        std::chrono::steady_clock::time_point deadline;
+    };
+    std::vector<LoudnessEqRetireEntry> loudnessEqRetireQueue_;   // control thread only
+    void sweepLoudnessEqRetireQueue();   // control thread only
+
     uint64_t lastSeenGeneration_ = 0; // audio thread only
 
     // ---- Diagnostics counters (relaxed atomic) ----

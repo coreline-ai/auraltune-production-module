@@ -9,6 +9,10 @@
 
 #include "AuralTuneEQEngine.h"
 
+#include "loudness/IsoContours.h"
+#include "loudness/LoudnessCompensator.h"
+#include "loudness/LoudnessEqualizer.h"
+
 #if defined(__ANDROID__)
 #include <android/log.h>
 #endif
@@ -43,6 +47,7 @@ AuralTuneEQEngine::AuralTuneEQEngine(double sampleRate)
     auto* boot = new EngineSnapshot{};
     for (auto& c : boot->manualCoeffs) c = BiquadCoeffs::unity();
     for (auto& c : boot->autoEqCoeffs) c = BiquadCoeffs::unity();
+    for (auto& c : boot->loudnessCompCoeffs) c = BiquadCoeffs::unity();
     boot->generation = 0;
     activeSnapshot_.store(boot, std::memory_order_release);
 }
@@ -54,6 +59,11 @@ AuralTuneEQEngine::~AuralTuneEQEngine() {
     // for the retire grace.
     delete activeSnapshot_.load(std::memory_order_relaxed);
     for (auto& entry : retireQueue_) {
+        delete entry.ptr;
+    }
+    // Stage D: free the auto-leveler instance and any retired predecessors.
+    delete activeLoudnessEq_.load(std::memory_order_relaxed);
+    for (auto& entry : loudnessEqRetireQueue_) {
         delete entry.ptr;
     }
 }
@@ -150,6 +160,35 @@ BiquadCoeffs AuralTuneEQEngine::highShelfCoeffs(double frequency,
     return c;
 }
 
+BiquadCoeffs AuralTuneEQEngine::highPassCoeffs(double frequency,
+                                              double q,
+                                              double sampleRate) {
+    // RBJ Audio EQ Cookbook — high-pass biquad (2nd-order Butterworth at Q=1/√2).
+    //   b0 =  (1+cosω)/2;  b1 = -(1+cosω);  b2 = (1+cosω)/2
+    //   a0 =   1+α;        a1 = -2cosω;     a2 = 1-α
+    //   α  = sinω / (2Q),  ω = 2π·fc/fs
+    // No gain parameter — magnitude is unity in the passband and rolls off below fc.
+    const double omega = 2.0 * M_PI * frequency / sampleRate;
+    const double sinW  = std::sin(omega);
+    const double cosW  = std::cos(omega);
+    const double alpha = sinW / (2.0 * q);
+
+    const double b0 =  (1.0 + cosW) / 2.0;
+    const double b1 = -(1.0 + cosW);
+    const double b2 =  (1.0 + cosW) / 2.0;
+    const double a0 =   1.0 + alpha;
+    const double a1 = -2.0 * cosW;
+    const double a2 =   1.0 - alpha;
+
+    BiquadCoeffs c;
+    c.b0 = b0 / a0;
+    c.b1 = b1 / a0;
+    c.b2 = b2 / a0;
+    c.a1 = a1 / a0;
+    c.a2 = a2 / a0;
+    return c;
+}
+
 // Inverse-bilinear (digital→analog at sourceRate) followed by forward-bilinear
 // (analog→digital at targetRate). Matches BiquadMath.preWarpFrequency.
 double AuralTuneEQEngine::preWarpFrequency(double freq,
@@ -189,6 +228,9 @@ BiquadCoeffs AuralTuneEQEngine::buildAutoEqFilter(EqFilterType type,
             return lowShelfCoeffs(effectiveFreq, gainDB, q, currentRate_);
         case EqFilterType::HighShelf:
             return highShelfCoeffs(effectiveFreq, gainDB, q, currentRate_);
+        case EqFilterType::HighPass:
+            // gainDB is unused for HPF — see RBJ cookbook formula
+            return highPassCoeffs(effectiveFreq, q, currentRate_);
     }
     return BiquadCoeffs::unity();
 }
@@ -274,6 +316,17 @@ void AuralTuneEQEngine::writeAllCoeffsInto(EngineSnapshot& dst) const {
     for (int i = autoEqActiveCount_; i < kMaxAutoEqFilters; ++i) {
         dst.autoEqCoeffs[i] = BiquadCoeffs::unity();
     }
+
+    // Stage C: Loudness Compensation cascade — 4 fixed sections. Coefficient
+    // shape depends on the cached phon vs reference 80 phon. At reference all
+    // sections are unity (free pass-through).
+    {
+        const auto coeffs = LoudnessCompensator::computeCoefficients(
+            loudnessCompPhon_, currentRate_, /*referencePhon=*/80.0);
+        for (int i = 0; i < kLoudnessCompSections; ++i) {
+            dst.loudnessCompCoeffs[i] = coeffs[i];
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +363,9 @@ int AuralTuneEQEngine::updateAutoEq(float preampDB,
         if (!isFiniteFloat(freq) || freq <= 0.0f) return -1;
         if (!isFiniteFloat(q)    || q    <= 0.0f) return -1;
         if (!isFiniteFloat(gain) || std::fabs(gain) > kMaxAbsGainDB) return -1;
-        if (ft < 0 || ft > 2) return -2;
+        // Stage A (#A): allow EqFilterType::HighPass (=3). gainDB is unused for
+        // HPF but still range-checked above so the wrapper contract stays uniform.
+        if (ft < 0 || ft > 3) return -2;
     }
 
     std::lock_guard<std::mutex> lock(updateMutex_);
@@ -431,6 +486,146 @@ void AuralTuneEQEngine::setAutoEqPreampEnabled(bool e) {
     publishSnapshot(slot);
 }
 
+// ---------------------------------------------------------------------------
+// Stage C: Loudness Compensation (ISO 226:2023)
+// ---------------------------------------------------------------------------
+
+void AuralTuneEQEngine::setLoudnessCompensationEnabled(bool e) {
+    std::lock_guard<std::mutex> lock(updateMutex_);
+    const EngineSnapshot* prev = activeSnapshot_.load(std::memory_order_acquire);
+    if (prev->loudnessCompOn == e) {
+        loudnessCompEnabled_ = e;
+        return;
+    }
+    loudnessCompEnabled_ = e;
+    EngineSnapshot* slot = allocateSnapshotFromCurrent();
+    slot->loudnessCompOn = e;
+    slot->requestDelayReset = false;
+    // Always recompute coefficients so the chain is in sync with the
+    // current cached phon (e.g. user toggled enable while at 60 phon).
+    {
+        const auto coeffs = LoudnessCompensator::computeCoefficients(
+            loudnessCompPhon_, currentRate_, /*referencePhon=*/80.0);
+        for (int i = 0; i < kLoudnessCompSections; ++i) {
+            slot->loudnessCompCoeffs[i] = coeffs[i];
+        }
+    }
+    publishSnapshot(slot);
+}
+
+int AuralTuneEQEngine::setLoudnessCompensationVolume(float systemVolume0to1) {
+    if (!isFiniteFloat(systemVolume0to1)) return -1;
+    const double newPhon = IsoContours::estimatedPhonFromSystemVolume(systemVolume0to1);
+
+    std::lock_guard<std::mutex> lock(updateMutex_);
+
+    // Coalesce rapid updates: if phon changed by less than 1.0 AND the chain
+    // is currently enabled, skip the publish. When disabled we always store
+    // the new phon so a future enable picks up the latest value, but skip
+    // snapshot churn when there's nothing to apply yet.
+    const bool tinyDelta = std::fabs(newPhon - loudnessCompPhon_) < 1.0;
+    loudnessCompPhon_ = newPhon;
+    if (tinyDelta && loudnessCompEnabled_) return 0;
+    if (!loudnessCompEnabled_) return 0;   // store-only; no need to publish
+
+    EngineSnapshot* slot = allocateSnapshotFromCurrent();
+    slot->requestDelayReset = false;
+    {
+        const auto coeffs = LoudnessCompensator::computeCoefficients(
+            newPhon, currentRate_, /*referencePhon=*/80.0);
+        for (int i = 0; i < kLoudnessCompSections; ++i) {
+            slot->loudnessCompCoeffs[i] = coeffs[i];
+        }
+    }
+    publishSnapshot(slot);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Stage D: Loudness Equalizer (BS.1770 auto-leveler)
+// ---------------------------------------------------------------------------
+
+void AuralTuneEQEngine::sweepLoudnessEqRetireQueue() {
+    const auto now = std::chrono::steady_clock::now();
+    auto it = loudnessEqRetireQueue_.begin();
+    while (it != loudnessEqRetireQueue_.end()) {
+        if (now >= it->deadline) {
+            delete it->ptr;
+            it = loudnessEqRetireQueue_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void AuralTuneEQEngine::setLoudnessEqEnabled(bool e) {
+    std::lock_guard<std::mutex> lock(updateMutex_);
+    const EngineSnapshot* prev = activeSnapshot_.load(std::memory_order_acquire);
+    if (prev->loudnessEqOn == e) return;
+
+    // If enabling and no active LE exists yet, allocate one with current
+    // settings. The pointer publish is independent of the snapshot bool.
+    if (e && activeLoudnessEq_.load(std::memory_order_acquire) == nullptr) {
+        loudnessEqSettings_.enabled = true;
+        auto* fresh = new LoudnessEqualizer(loudnessEqSettings_,
+                                            static_cast<float>(currentRate_));
+        activeLoudnessEq_.store(fresh, std::memory_order_release);
+    } else if (e) {
+        // Re-enable existing instance — flip its settings flag in a fresh copy
+        // (we don't mutate the audio-thread-visible instance; we publish a new
+        // one with updated settings).
+        loudnessEqSettings_.enabled = true;
+        auto* fresh = new LoudnessEqualizer(loudnessEqSettings_,
+                                            static_cast<float>(currentRate_));
+        auto* old = activeLoudnessEq_.exchange(fresh, std::memory_order_acq_rel);
+        if (old) {
+            loudnessEqRetireQueue_.push_back({old, std::chrono::steady_clock::now()
+                                                    + std::chrono::milliseconds(kRetireGraceMs)});
+        }
+    } else {
+        // Disable: just update settings flag for future re-enables. Audio
+        // thread short-circuits via the snapshot bool below.
+        loudnessEqSettings_.enabled = false;
+    }
+    sweepLoudnessEqRetireQueue();
+
+    EngineSnapshot* slot = allocateSnapshotFromCurrent();
+    slot->loudnessEqOn       = e;
+    slot->requestDelayReset  = false;
+    publishSnapshot(slot);
+}
+
+void AuralTuneEQEngine::updateLoudnessEqSettings(float targetLoudnessDb,
+                                                  float maxBoostDb,
+                                                  float maxCutDb,
+                                                  float compressionThresholdOffsetDb,
+                                                  float compressionRatio,
+                                                  float compressionKneeDb,
+                                                  float gainAttackMs,
+                                                  float gainReleaseMs) {
+    std::lock_guard<std::mutex> lock(updateMutex_);
+
+    loudnessEqSettings_.targetLoudnessDb            = targetLoudnessDb;
+    loudnessEqSettings_.maxBoostDb                  = maxBoostDb;
+    loudnessEqSettings_.maxCutDb                    = maxCutDb;
+    loudnessEqSettings_.compressionThresholdOffsetDb = compressionThresholdOffsetDb;
+    loudnessEqSettings_.compressionRatio             = compressionRatio;
+    loudnessEqSettings_.compressionKneeDb            = compressionKneeDb;
+    loudnessEqSettings_.gainAttackMs                = gainAttackMs;
+    loudnessEqSettings_.gainReleaseMs               = gainReleaseMs;
+    // analysisWindowMs / analysisHopMs / detector envelopes left at defaults.
+
+    // Allocate a fresh LE instance with the new settings; retire the old one.
+    auto* fresh = new LoudnessEqualizer(loudnessEqSettings_,
+                                        static_cast<float>(currentRate_));
+    auto* old = activeLoudnessEq_.exchange(fresh, std::memory_order_acq_rel);
+    if (old) {
+        loudnessEqRetireQueue_.push_back({old, std::chrono::steady_clock::now()
+                                                + std::chrono::milliseconds(kRetireGraceMs)});
+    }
+    sweepLoudnessEqRetireQueue();
+}
+
 void AuralTuneEQEngine::updateSampleRate(int newRate) {
     // Tier C-1: defense-in-depth bounds. JNI also validates, but direct
     // C++ callers must get the same protection.
@@ -474,6 +669,7 @@ int AuralTuneEQEngine::process(float* pcm, int numFrames) noexcept {
         if (s->requestDelayReset) {
             for (auto& f : manualChain_) f.reset();
             for (auto& f : autoEqChain_) f.reset();
+            for (auto& f : loudnessCompChain_) f.reset();
         }
         lastSeenGeneration_ = s->generation;
     }
@@ -503,7 +699,29 @@ int AuralTuneEQEngine::process(float* pcm, int numFrames) noexcept {
         }
     }
 
-    // 4. Soft limiter — sample-by-sample asymptotic soft knee.
+    // 4. Stage C: Loudness Compensation cascade — 4 fixed sections that apply
+    //    ISO 226 equal-loudness compensation. At reference phon all coeffs are
+    //    unity so the loop is effectively free; we still run through to keep
+    //    delay state continuous when the user toggles back to a non-reference
+    //    volume mid-playback.
+    if (s->loudnessCompOn) {
+        for (int i = 0; i < kLoudnessCompSections; ++i) {
+            loudnessCompChain_[i].processStereoInterleaved(
+                s->loudnessCompCoeffs[i], pcm, numFrames);
+        }
+    }
+
+    // 5. Stage D: BS.1770 auto-leveler. Heavy-state instance lives separately
+    //    from the snapshot — load once per callback (acquire) so the same
+    //    pointer is used end-to-end.
+    if (s->loudnessEqOn) {
+        LoudnessEqualizer* le = activeLoudnessEq_.load(std::memory_order_acquire);
+        if (le != nullptr) {
+            le->processStereoInterleaved(pcm, numFrames);
+        }
+    }
+
+    // 6. Soft limiter — sample-by-sample asymptotic soft knee.
     if (s->limiterOn) {
         constexpr float thr = kLimiterThreshold;
         constexpr float hr  = kLimiterHeadroom;
@@ -519,13 +737,17 @@ int AuralTuneEQEngine::process(float* pcm, int numFrames) noexcept {
         }
     }
 
-    // 5. NaN guard — fast first-frame check. Audio-thread context, so we
+    // 7. NaN guard — fast first-frame check. Audio-thread context, so we
     //    can directly reset our biquad delay state. -fno-finite-math-only
     //    ensures the optimizer cannot dead-code this.
     if (numFrames >= 1 &&
         (!std::isfinite(pcm[0]) || !std::isfinite(pcm[1]))) {
         for (auto& f : manualChain_) f.reset();
         for (auto& f : autoEqChain_) f.reset();
+        for (auto& f : loudnessCompChain_) f.reset();
+        if (LoudnessEqualizer* le = activeLoudnessEq_.load(std::memory_order_acquire)) {
+            le->reset();
+        }
         std::memset(pcm, 0, static_cast<size_t>(numFrames) * 2u * sizeof(float));
         diagNonFiniteReset_.fetch_add(1, std::memory_order_relaxed);
     }
