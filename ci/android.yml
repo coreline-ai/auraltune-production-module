@@ -87,18 +87,18 @@ jobs:
         run: |
           set -euo pipefail
           g++ -std=c++17 -O2 -fno-finite-math-only \
-              -I audio-engine/src/main/cpp \
+              -I audio-engine/src/main/cpp/core \
               audio-engine/src/test/cpp/AuralTuneEQEngineTest.cpp \
-              audio-engine/src/main/cpp/BiquadFilter.cpp \
-              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              audio-engine/src/main/cpp/core/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp audio-engine/src/main/cpp/core/loudness/IsoContours.cpp audio-engine/src/main/cpp/core/loudness/LoudnessCompensator.cpp audio-engine/src/main/cpp/core/loudness/KWeightingFilter.cpp \
               -o /tmp/run_native_tests
           /tmp/run_native_tests
 
           g++ -std=c++17 -O2 -fno-finite-math-only \
-              -I audio-engine/src/main/cpp \
+              -I audio-engine/src/main/cpp/core \
               audio-engine/src/test/cpp/GoldenResponseTest.cpp \
-              audio-engine/src/main/cpp/BiquadFilter.cpp \
-              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              audio-engine/src/main/cpp/core/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp audio-engine/src/main/cpp/core/loudness/IsoContours.cpp audio-engine/src/main/cpp/core/loudness/LoudnessCompensator.cpp audio-engine/src/main/cpp/core/loudness/KWeightingFilter.cpp \
               -o /tmp/run_golden
           /tmp/run_golden
 
@@ -109,11 +109,11 @@ jobs:
               > audio-engine/src/test/cpp/golden/hd600_oratory1990.json
 
           g++ -std=c++17 -O2 -fno-finite-math-only \
-              -I audio-engine/src/main/cpp \
+              -I audio-engine/src/main/cpp/core \
               -DGOLDEN_FIXTURE_PATH="\"$(pwd)/audio-engine/src/test/cpp/golden/hd600_oratory1990.json\"" \
               audio-engine/src/test/cpp/ScipyGoldenResponseTest.cpp \
-              audio-engine/src/main/cpp/BiquadFilter.cpp \
-              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              audio-engine/src/main/cpp/core/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp audio-engine/src/main/cpp/core/loudness/IsoContours.cpp audio-engine/src/main/cpp/core/loudness/LoudnessCompensator.cpp audio-engine/src/main/cpp/core/loudness/KWeightingFilter.cpp \
               -o /tmp/run_scipy_golden
           /tmp/run_scipy_golden
 
@@ -124,11 +124,11 @@ jobs:
               > audio-engine/src/test/cpp/golden/hd600_lfilter_ir.bin
 
           g++ -std=c++17 -O2 -fno-finite-math-only \
-              -I audio-engine/src/main/cpp \
+              -I audio-engine/src/main/cpp/core \
               -DLFILTER_IR_PATH="\"$(pwd)/audio-engine/src/test/cpp/golden/hd600_lfilter_ir.bin\"" \
               audio-engine/src/test/cpp/ScipyLfilterIRTest.cpp \
-              audio-engine/src/main/cpp/BiquadFilter.cpp \
-              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              audio-engine/src/main/cpp/core/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp audio-engine/src/main/cpp/core/loudness/IsoContours.cpp audio-engine/src/main/cpp/core/loudness/LoudnessCompensator.cpp audio-engine/src/main/cpp/core/loudness/KWeightingFilter.cpp \
               -o /tmp/run_lfilter
           /tmp/run_lfilter
 
@@ -143,10 +143,10 @@ jobs:
         run: |
           set -euo pipefail
           g++ -std=c++17 -O2 -fno-finite-math-only -pthread \
-              -I audio-engine/src/main/cpp \
+              -I audio-engine/src/main/cpp/core \
               audio-engine/src/test/cpp/SnapshotRaceTest.cpp \
-              audio-engine/src/main/cpp/BiquadFilter.cpp \
-              audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+              audio-engine/src/main/cpp/core/BiquadFilter.cpp \
+              audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp audio-engine/src/main/cpp/core/loudness/IsoContours.cpp audio-engine/src/main/cpp/core/loudness/LoudnessCompensator.cpp audio-engine/src/main/cpp/core/loudness/KWeightingFilter.cpp \
               -o /tmp/run_race
           /tmp/run_race
 
@@ -159,10 +159,10 @@ jobs:
           # blocker even if the regular run is clean.
           clang++ -std=c++17 -O1 -g -fno-finite-math-only \
                   -fsanitize=thread -pthread \
-                  -I audio-engine/src/main/cpp \
+                  -I audio-engine/src/main/cpp/core \
                   audio-engine/src/test/cpp/SnapshotRaceTest.cpp \
-                  audio-engine/src/main/cpp/BiquadFilter.cpp \
-                  audio-engine/src/main/cpp/AuralTuneEQEngine.cpp \
+                  audio-engine/src/main/cpp/core/BiquadFilter.cpp \
+                  audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp audio-engine/src/main/cpp/core/loudness/IsoContours.cpp audio-engine/src/main/cpp/core/loudness/LoudnessCompensator.cpp audio-engine/src/main/cpp/core/loudness/KWeightingFilter.cpp \
                   -o /tmp/run_race_tsan
           # TSan exits 66 on detected race regardless of test's own assertion
           # status. We treat ANY non-zero exit as failure.
