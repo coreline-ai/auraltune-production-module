@@ -103,6 +103,10 @@ dependencies {
     // DataStore
     implementation(libs.androidx.datastore.preferences)
 
+    // Media3 ExoPlayer — T1 local-file playback (engine inserted via AudioProcessor)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.common)
+
     // Compose
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
