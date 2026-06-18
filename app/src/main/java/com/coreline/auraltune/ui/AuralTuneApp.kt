@@ -2,6 +2,8 @@
 // Top-level Composable. Wires the AutoEqViewModel into a single-screen Scaffold and hosts
 // the Phase 0 / Phase 6 MVP layout: status card, search section, diagnostics card,
 // test-tone toggle, and AutoEq attribution.
+@file:OptIn(androidx.media3.common.util.UnstableApi::class)
+
 package com.coreline.auraltune.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -52,6 +54,7 @@ import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.AudioPlayerService
 import com.coreline.auraltune.audio.DeviceAutoEqManager
 import com.coreline.auraltune.audio.TestTone
+import com.coreline.auraltune.audio.MusicPlayerController
 
 /**
  * Top-level AuralTune Composable. Hosts the [AuralTuneTheme] + [Scaffold] and binds the
@@ -80,7 +83,8 @@ fun AuralTuneApp() {
                 coroutineScope = managerScope,
             )
         }
-        DisposableEffectClose(player, engine, deviceManager)
+        val musicController = remember { MusicPlayerController(context, engine) }
+        DisposableEffectClose(player, engine, deviceManager, musicController)
 
         val vm: AutoEqViewModel = viewModel(
             factory = AutoEqViewModelFactory(
@@ -113,6 +117,7 @@ fun AuralTuneApp() {
                 vm = vm,
                 player = player,
                 tone = tone,
+                musicController = musicController,
                 contentPadding = padding,
             )
         }
@@ -124,6 +129,7 @@ private fun AuralTuneScreen(
     vm: AutoEqViewModel,
     player: AudioPlayerService,
     tone: TestTone,
+    musicController: MusicPlayerController,
     contentPadding: PaddingValues,
 ) {
     val query by vm.query.collectAsState()
@@ -138,6 +144,8 @@ private fun AuralTuneScreen(
     var testToneOn by remember { mutableStateOf(false) }
     LaunchedEffect(testToneOn) {
         if (testToneOn) {
+            // 배타: 테스트 톤과 음악은 같은 엔진을 audio thread에서 process하므로 동시 금지.
+            musicController.stop()
             tone.reset()
             player.start { out, n -> tone.fill(out, n) }
         } else {
@@ -171,6 +179,32 @@ private fun AuralTuneScreen(
                 )
                 Spacer(Modifier.height(0.dp))
                 Switch(checked = testToneOn, onCheckedChange = { testToneOn = it })
+            }
+        }
+
+        // 로컬 음악 재생 (T1 — ExoPlayer → AuralTuneAudioProcessor → EQ 엔진)
+        item {
+            val audioPicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument(),
+            ) { uri ->
+                if (uri != null) {
+                    testToneOn = false // 배타: 음악 재생 시 테스트 톤 정지
+                    musicController.play(uri)
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // TODO(i18n): 문자열 리소스화
+                Button(
+                    onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                    modifier = Modifier.weight(1f),
+                ) { Text("음악 파일 재생") }
+                OutlinedButton(
+                    onClick = { musicController.stop() },
+                    modifier = Modifier.weight(1f),
+                ) { Text("정지") }
             }
         }
 
@@ -331,18 +365,23 @@ private fun DisposableEffectClose(
     player: AudioPlayerService,
     engine: com.coreline.audio.AudioEngine,
     deviceManager: DeviceAutoEqManager,
+    musicController: MusicPlayerController,
 ) {
     androidx.compose.runtime.DisposableEffect(Unit) {
         // Start the device-route manager immediately so the engine sees the correct
         // sample rate AND restores any saved per-device profile before the user
         // hits "Test tone" / playback. Stop ordering on dispose:
-        //   1. deviceManager.close() — no more native updateSampleRate / updateAutoEq.
-        //   2. player.close()        — joins the audio thread (no more engine.process).
-        //   3. engine.close()        — frees the native handle. Lifecycle-safe per P0-3.
+        //   1. deviceManager.close()  — no more native updateSampleRate / updateAutoEq.
+        //   2. musicController.close() — releases ExoPlayer (its audio thread).
+        //   3. player.close()         — joins the TestTone audio thread.
+        //   4. engine.close()         — frees the native handle. Lifecycle-safe per P0-3.
+        // D1: wrap each pre-close step in runCatching so a throw never prevents
+        // engine.close() from freeing the native handle.
         deviceManager.start()
         onDispose {
-            deviceManager.close()
-            player.close()
+            runCatching { deviceManager.close() }
+            runCatching { musicController.close() }
+            runCatching { player.close() }
             engine.close()
         }
     }
