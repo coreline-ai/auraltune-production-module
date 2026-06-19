@@ -198,6 +198,9 @@ fun DiagnosticsCard(
                     DiagnosticsRow(stringResource(R.string.diagnostics_config_swap), diagnostics.configSwapCount)
                     DiagnosticsRow(stringResource(R.string.diagnostics_sample_rate), diagnostics.sampleRateChangeCount)
                     DiagnosticsRow(stringResource(R.string.diagnostics_total_frames), diagnostics.totalProcessedFrames)
+                    // 보정이 실제 엔진에 걸렸는지 객관 확인용 — active filters > 0 이면 EQ 적용 중.
+                    DiagnosticsRow("AutoEQ active filters", diagnostics.autoEqActiveCount.toLong())
+                    DiagnosticsRow("Applied generation", diagnostics.appliedGeneration)
                 }
             }
         }
