@@ -55,6 +55,8 @@ import com.coreline.auraltune.audio.AudioPlayerService
 import com.coreline.auraltune.audio.DeviceAutoEqManager
 import com.coreline.auraltune.audio.TestTone
 import com.coreline.auraltune.audio.MusicPlayerController
+import com.coreline.auraltune.audio.audiofx.AudioFxSessionProbe
+import androidx.compose.runtime.DisposableEffect
 
 /**
  * Top-level AuralTune Composable. Hosts the [AuralTuneTheme] + [Scaffold] and binds the
@@ -140,6 +142,15 @@ private fun AuralTuneScreen(
     val preampEnabled by vm.preampEnabled.collectAsState()
     val favorites by vm.favoriteIds.collectAsState()
     val diag by vm.diagnostics.collectAsState()
+
+    // Phase 2 PoC: 외부앱이 effect-control-session broadcast를 보내는지 측정.
+    val probeContext = LocalContext.current
+    val sessionProbe = remember { AudioFxSessionProbe(probeContext) }
+    DisposableEffect(Unit) {
+        sessionProbe.start()
+        onDispose { sessionProbe.close() }
+    }
+    val fxDetections by sessionProbe.detections.collectAsState()
 
     var testToneOn by remember { mutableStateOf(false) }
     LaunchedEffect(testToneOn) {
@@ -327,6 +338,44 @@ private fun AuralTuneScreen(
                 currentSampleRate = vm.engineSampleRate(),
                 deviceHash = vm.currentDeviceHash(),
             )
+        }
+
+        // Phase 2 PoC — 외부앱 AudioFx 신호 측정 카드 (임시 측정 도구).
+        item {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    // TODO(i18n): 문자열 리소스화 (PoC 임시 UI)
+                    Text(
+                        "외부앱 신호 측정 (PoC)",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        "이 앱을 켠 채 Spotify·유튜브 등 다른 음악 앱을 재생해 보세요. " +
+                            "신호를 보내는 앱만 외부 EQ 적용이 가능합니다.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "감지 ${fxDetections.size}건",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (fxDetections.isEmpty()) {
+                        Text(
+                            "아직 감지 없음",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    } else {
+                        fxDetections.takeLast(10).reversed().forEach { d ->
+                            Text(
+                                "${d.action} · ${d.packageName} · session=${d.audioSession}",
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // Attribution footer
