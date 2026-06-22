@@ -164,6 +164,18 @@ private fun AuralTuneScreen(
         }
     }
 
+    // 음악 파일 선택 launcher — 본문에서 remember (LazyColumn item 안에 두면
+    // 스크롤로 item이 detach될 때 ActivityResult 콜백이 유실될 수 있음).
+    val audioPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        android.util.Log.i("MusicPlay", "picked uri=$uri")
+        if (uri != null) {
+            testToneOn = false // 배타: 음악 재생 시 테스트 톤 정지
+            musicController.play(uri)
+        }
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -193,23 +205,25 @@ private fun AuralTuneScreen(
             }
         }
 
-        // 로컬 음악 재생 (T1 — ExoPlayer → AuralTuneAudioProcessor → EQ 엔진)
+        // 로컬 음악 재생 (T1) — launcher는 본문에서 remember됨.
         item {
-            val audioPicker = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.OpenDocument(),
-            ) { uri ->
-                if (uri != null) {
-                    testToneOn = false // 배타: 음악 재생 시 테스트 톤 정지
-                    musicController.play(uri)
-                }
-            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 // TODO(i18n): 문자열 리소스화
+                val playCtx = LocalContext.current
                 Button(
-                    onClick = { audioPicker.launch(arrayOf("audio/*")) },
+                    onClick = {
+                        // DEBUG(T1 자동 테스트): SAF 대신 MediaStore 첫 곡 직접 재생.
+                        // 정식 경로 복원 시 audioPicker.launch(arrayOf("audio/*"))로 교체.
+                        val uri = firstAudioUri(playCtx)
+                        android.util.Log.i("MusicPlay", "debug firstAudioUri=$uri")
+                        if (uri != null) {
+                            testToneOn = false
+                            musicController.play(uri)
+                        }
+                    },
                     modifier = Modifier.weight(1f),
                 ) { Text("음악 파일 재생") }
                 OutlinedButton(
@@ -395,6 +409,23 @@ private fun AuralTuneScreen(
  * Falls back to the URI's last path segment when DISPLAY_NAME isn't reported
  * (e.g. some pickers return null cursor for the column).
  */
+/** DEBUG(T1 자동 테스트): MediaStore에서 첫 음악 파일 content URI. 정식 경로(SAF) 복원 시 제거. */
+private fun firstAudioUri(context: android.content.Context): android.net.Uri? {
+    val collection = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+    val proj = arrayOf(android.provider.MediaStore.Audio.Media._ID)
+    return runCatching {
+        context.contentResolver.query(
+            collection, proj,
+            "${android.provider.MediaStore.Audio.Media.IS_MUSIC}!=0", null,
+            "${android.provider.MediaStore.Audio.Media.TITLE} ASC",
+        )?.use { c ->
+            if (c.moveToFirst()) {
+                android.content.ContentUris.withAppendedId(collection, c.getLong(0))
+            } else null
+        }
+    }.getOrNull()
+}
+
 private fun queryDisplayName(context: android.content.Context, uri: android.net.Uri): String {
     return runCatching {
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->

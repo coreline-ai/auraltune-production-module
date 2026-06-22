@@ -141,6 +141,7 @@ class DeviceAutoEqManager(
      */
     suspend fun selectProfileForCurrentDevice(entry: AutoEqCatalogEntry): Boolean {
         val key = lastKey
+        Log.i(TAG, "selectProfile: '${entry.name}' key=${key?.displayName} eligible=${key?.supportsAutoEq}")
         // Always persist the global "selectedProfileId" so post-restart restore works
         // even when no device is currently routed.
         settings.setSelectedProfileId(entry.id)
@@ -209,6 +210,7 @@ class DeviceAutoEqManager(
             gainsDB = gains,
             qFactors = qs,
         )
+        Log.i(TAG, "pushToEngine: applied $n filters, preamp=${p.preampDB}")
     }
 
     /**

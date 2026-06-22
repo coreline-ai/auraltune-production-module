@@ -9,6 +9,12 @@
     <!-- Audio routing. MODIFY_AUDIO_SETTINGS is normal-protection on all SDK levels. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- DEBUG(T1 자동 테스트용): MediaStore 첫 곡 직접 재생을 위한 읽기 권한.
+         정식 경로는 SAF(OpenDocument)라 권한 불필요 — 자동 재생 검증 후 제거. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <!-- Bluetooth address visibility for device-keyed AutoEQ selection (Phase 5).
          Android 12+ runtime permission; on lower SDKs the permission is implicit. -->
     <uses-permission

@@ -91,6 +91,13 @@ class AutoEqViewModel(
     val diagnostics: StateFlow<AudioEngine.Diagnostics> =
         flow {
             while (true) {
+                // DEBUG(검증용): correction/preamp 토글이 엔진에 반영되는지 데이터로 추적.
+                val s = engine.readAppliedSnapshot()
+                android.util.Log.i(
+                    "EqState",
+                    "autoEqEnabled=${s.autoEqEnabled} filters=${s.autoEqFilterCount} " +
+                        "preampEnabled=${s.preampEnabled} preampGain=${s.preampLinearGain}",
+                )
                 emit(engine.readDiagnostics())
                 kotlinx.coroutines.delay(DIAG_POLL_MS)
             }

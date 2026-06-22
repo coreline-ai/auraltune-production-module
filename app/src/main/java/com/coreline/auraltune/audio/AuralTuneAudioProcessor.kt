@@ -34,10 +34,11 @@ class AuralTuneAudioProcessor(private val engine: AudioEngine) : BaseAudioProces
     private var floatScratch: ByteBuffer? = null
 
     private fun scratch(bytes: Int): ByteBuffer {
-        var s = floatScratch
-        if (s == null || s.capacity() < bytes) {
-            s = ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder())
-            floatScratch = s
+        val cur = floatScratch
+        val s = if (cur != null && cur.capacity() >= bytes) {
+            cur
+        } else {
+            ByteBuffer.allocateDirect(bytes).order(ByteOrder.nativeOrder()).also { floatScratch = it }
         }
         s.clear()
         return s

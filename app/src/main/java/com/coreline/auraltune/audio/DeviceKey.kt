@@ -101,7 +101,7 @@ data class DeviceKey(
                     // AutoEQ is N/A — speakers/HDMI/telephony shouldn't get headphone correction.
                     DeviceKey(
                         raw = "speaker|$productName|${info.type}",
-                        supportsAutoEq = false,
+                        supportsAutoEq = true, // TEST(검증용): 스피커에서도 EQ 적용. 정식 배포 시 false로 복원.
                         displayName = productName,
                     )
                 }
