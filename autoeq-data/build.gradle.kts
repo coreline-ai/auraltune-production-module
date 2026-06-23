@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -33,6 +34,11 @@ android {
         jvmTarget = "17"
     }
 
+    // Room schema export (Phase 4): committed under autoeq-data/schemas for migration tests.
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
+    }
+
     testOptions {
         unitTests {
             isIncludeAndroidResources = true
@@ -54,6 +60,11 @@ dependencies {
 
     api(libs.kotlinx.coroutines.android)
     api(libs.kotlinx.serialization.json)
+
+    // Room (Phase 4: DB-first catalog). room-ktx for coroutine/Flow DAO support.
+    implementation(libs.room.runtime)
+    implementation(libs.room.ktx)
+    ksp(libs.room.compiler)
 
     testImplementation(libs.junit)
     testImplementation(libs.mockk)

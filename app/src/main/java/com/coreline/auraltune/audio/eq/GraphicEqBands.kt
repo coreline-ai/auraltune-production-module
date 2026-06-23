@@ -15,8 +15,14 @@ object GraphicEqBands {
     const val MIN_HZ = 20.0
     const val MAX_HZ = 20_000.0
 
-    /** Max slider gain in dB (±). */
+    /** Default slider gain limit in dB (±). User may change it; see [GAIN_LIMIT_OPTIONS]. */
     const val MAX_GAIN_DB = 12.0f
+
+    /** Absolute ceiling for any selectable limit — storage sanity clamp uses this, not the live limit. */
+    const val MAX_GAIN_LIMIT_DB = 20.0f
+
+    /** User-selectable gain limits (segmented chips). [MAX_GAIN_DB] is the default. */
+    val GAIN_LIMIT_OPTIONS = floatArrayOf(6.0f, 12.0f, 15.0f, 20.0f)
 
     /** Log-spaced center frequencies: f_i = 20 * 1000^(i/(N-1)). */
     val frequencies: DoubleArray = DoubleArray(COUNT) { i ->

@@ -91,7 +91,8 @@ data class AutoEqProfile(
      * Use this whenever a profile crosses a trust boundary (disk, network, JNI).
      */
     fun validated(): AutoEqProfile = copy(
-        preampDB = preampDB.coerceIn(-30f, 30f),
+        // coerceIn passes NaN through unchanged, so sanitize non-finite preamp to 0 first.
+        preampDB = if (preampDB.isFinite()) preampDB.coerceIn(-30f, 30f) else 0f,
         filters = filters
             .filter {
                 it.frequency.isFinite() && it.frequency > 0 &&

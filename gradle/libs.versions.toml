@@ -3,6 +3,7 @@
 agp = "8.5.2"
 kotlin = "1.9.24"
 ksp = "1.9.24-1.0.20"
+room = "2.6.1"
 ndk = "27.0.12077973"
 # minSdk 26: AAudio support, Float32 PCM, modern audio APIs
 # targetSdk/compileSdk 34: Android 14
@@ -14,7 +15,7 @@ compileSdk = "34"
 coreKtx = "1.13.1"
 lifecycle = "2.8.4"
 activityCompose = "1.9.1"
-composeBom = "2024.06.00"
+composeBom = "2024.09.00"
 datastore = "1.1.1"
 # Media3 ExoPlayer — Phase 1 (T1) local-file playback; engine inserted via AudioProcessor
 media3 = "1.4.1"
@@ -72,9 +73,16 @@ robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExt" }
 androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
 
+# Room (Phase 4: DB-first AutoEQ catalog)
+room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
+room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }

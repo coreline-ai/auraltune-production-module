@@ -40,17 +40,14 @@ import com.coreline.autoeq.model.AutoEqProfile
 import com.coreline.auraltune.R
 
 /**
- * Card showing the currently active AutoEQ profile (if any) plus correction / preamp toggles.
+ * Card showing the currently active AutoEQ profile (if any). The correction / preamp
+ * toggles live in [AutoEqToggleCard] (placed above the Graphic EQ).
  * Use empty-state copy from strings.xml when [profile] is null.
  */
 @Composable
 fun StatusCard(
     profile: AutoEqProfile?,
-    isEnabled: Boolean,
-    preampEnabled: Boolean,
     onClear: () -> Unit,
-    onToggleCorrection: () -> Unit,
-    onTogglePreamp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
@@ -86,7 +83,24 @@ fun StatusCard(
                     }
                 }
             }
-            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+/** AutoEQ correction + preamp toggles. Placed directly above the Graphic EQ. */
+@Composable
+fun AutoEqToggleCard(
+    isEnabled: Boolean,
+    preampEnabled: Boolean,
+    onToggleCorrection: () -> Unit,
+    onTogglePreamp: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
             ToggleRow(
                 label = stringResource(R.string.correction_toggle),
                 checked = isEnabled,

@@ -6,6 +6,7 @@ package com.coreline.auraltune.audio
 
 import android.media.AudioDeviceInfo
 import android.os.Build
+import com.coreline.auraltune.BuildConfig
 import java.security.MessageDigest
 
 /**
@@ -98,12 +99,19 @@ data class DeviceKey(
                 AudioDeviceInfo.TYPE_LINE_DIGITAL,
                 AudioDeviceInfo.TYPE_LINE_ANALOG,
                 AudioDeviceInfo.TYPE_TELEPHONY -> {
-                    // AutoEQ is N/A — speakers/HDMI/telephony shouldn't get headphone correction.
-                    DeviceKey(
-                        raw = "speaker|$productName|${info.type}",
-                        supportsAutoEq = true, // TEST(검증용): 스피커에서도 EQ 적용. 정식 배포 시 false로 복원.
-                        displayName = productName,
-                    )
+                    // AutoEQ is N/A for speakers/HDMI/telephony — headphone correction
+                    // must not apply on these routes. Release returns null. Debug keeps an
+                    // eligible key so EQ can be A/B-tested over the built-in speaker without
+                    // a headphone attached (dev-plan 110525 Phase 1 release gate).
+                    if (BuildConfig.DEBUG) {
+                        DeviceKey(
+                            raw = "speaker|$productName|${info.type}",
+                            supportsAutoEq = true,
+                            displayName = productName,
+                        )
+                    } else {
+                        null
+                    }
                 }
                 else -> null
             }

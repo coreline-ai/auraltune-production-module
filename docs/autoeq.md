@@ -6,7 +6,7 @@ AuralTune can apply headphone-specific frequency response corrections using prof
 
 Every pair of headphones colors the sound differently. Some boost bass, others are harsh in the treble. AutoEQ measures these deviations and generates corrective EQ filters. AuralTune applies these filters per-device, so each pair of headphones gets its own correction profile.
 
-Corrections are applied on top of AuralTune's 10-band EQ, so you can still tweak the sound to your taste after applying a profile.
+Corrections are applied on top of AuralTune's **20-band graphic EQ**, so you can still tweak the sound to your taste after applying a profile. The graphic EQ (the engine's Manual chain) and the AutoEQ correction run as independent cascades and combine — the response graph shows their composite curve.
 
 ## Browse Built-in Profiles
 
@@ -14,7 +14,7 @@ Corrections are applied on top of AuralTune's 10-band EQ, so you can still tweak
 2. Search for your headphone model by name
 3. Select a profile. It's applied immediately.
 
-Profiles are fetched on demand from the AutoEQ database and cached locally for offline use. The database includes thousands of headphones from major brands (Sony, Sennheiser, Apple, Bose, Audio-Technica, Beyerdynamic, and more).
+The catalog is **DB-first**: a snapshot of the AutoEQ index ships inside the app and is imported into a local Room database on first launch, so search works fully **offline from the first run**. The app refreshes the index from GitHub only when it has actually changed upstream (HTTP ETag). When you select a profile, its parsed filters are fetched once, stored in the database, and re-loaded locally (offline) thereafter — only the engine-relevant fields are stored, never the raw text. The database includes thousands of headphones from major brands (Sony, Sennheiser, Apple, Bose, Audio-Technica, Beyerdynamic, and more).
 
 > **Tip:** If your exact model isn't listed, try searching for the product line — similar models often share frequency response characteristics.
 

@@ -10,6 +10,7 @@
     <!-- Search -->
     <string name="search_placeholder">Search headphones…</string>
     <string name="no_results">No headphones found</string>
+    <string name="search_prompt">Type a model name to search, or pick from the quick-select above</string>
 
     <!-- Status card -->
     <string name="no_correction_active">No correction active</string>
@@ -25,11 +26,6 @@
     <string name="diagnostics_non_finite">non-finite reset count</string>
     <string name="diagnostics_config_swap">config swap count</string>
     <string name="diagnostics_sample_rate">sample-rate change count</string>
-
-    <!-- Test tone -->
-    <string name="test_tone_label">Test tone</string>
-    <string name="test_tone_on">ON</string>
-    <string name="test_tone_off">OFF</string>
 
     <!-- Cache -->
     <string name="clear_cache">Clear cache</string>

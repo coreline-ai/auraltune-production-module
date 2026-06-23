@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug-only manifest overlay (Phase 1 release gate, dev-plan 110525).
+
+  These read permissions exist ONLY to support the debug "음악 파일 재생" shortcut that
+  plays the first MediaStore audio item directly (firstAudioUri). The release build uses
+  SAF (ACTION_OPEN_DOCUMENT), which grants per-URI access without any media permission, so
+  these permissions MUST NOT leak into release. AGP merges this overlay into debug builds only.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
+</manifest>

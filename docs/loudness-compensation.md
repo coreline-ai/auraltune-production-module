@@ -1,7 +1,8 @@
 # Loudness Compensation
 
 > 사람 귀의 주파수 민감도가 음량에 따라 비선형적으로 바뀌는 현상을 보정하는 기능.
-> AutoEQ와는 완전히 다른 목적의 별도 기능이라 [dev-plan](../dev-plan/implement_20260507_223901.md)에서 의도적으로 제외했다.
+
+> **⚠️ 구현 상태(2026-06-22 갱신):** 이 문서는 원래 "제외된 기능"으로 작성됐으나, **DSP 코어는 현재 구현되어 있다.** `audio-engine/src/main/cpp/core/loudness/`에 ISO 226 contour, K-weighting(ITU-R BS.1770), `LoudnessCompensator`, `GainComputer`, `GainSmoother`, `LoudnessEqualizer` 등이 존재하며 엔진 신호 체인(`Manual → AutoEQ preamp → AutoEQ → Loudness Comp → Loudness Eq → Soft Limiter → NaN guard`)에 포함된다. 아래 §2/§5/§6은 설계·근거·검증 기준 문서로 읽되, "추가할 경우"는 "구현된 방식"으로 이해할 것. (사용자 노출 UI/토글 범위는 별도 확인 필요.)
 
 ---
 
@@ -102,9 +103,11 @@ Loudness compensation을 추가할 경우 AuralTune Android 모듈에는 다음 
 
 ---
 
-## 4. 왜 Android dev-plan에서 제외됐나
+## 4. (이력) 초기 dev-plan에서 제외됐던 이유
 
-`dev-plan`은 **AutoEQ headphone correction**으로 명시 범위를 한정했기 때문이다 ([개발 목적/제외 범위](../dev-plan/implement_20260507_223901.md#개발-범위) 참조). 이유:
+> 아래는 **초기 MVP dev-plan 시점의 제외 사유**다. 이후 코어 DSP(`core/loudness/`)는 구현되어 엔진 cascade에 포함됐다. 역사적 맥락으로 보존한다.
+
+초기 `dev-plan`은 **AutoEQ headphone correction**으로 명시 범위를 한정했다 ([개발 목적/제외 범위](../dev-plan/implement_20260507_223901.md#개발-범위) 참조). 당시 이유:
 
 1. **별도 기능, 별도 복잡성**
    - ISO 226 테이블, K-weighting 필터, gain smoother 등 추가 8개 클래스가 필요

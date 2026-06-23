@@ -42,3 +42,19 @@
 
 # Coroutines internal
 -dontwarn kotlinx.coroutines.debug.**
+
+# --- Release log stripping (Phase 7 defense-in-depth) ------------------------------
+# Source sites are already gated behind BuildConfig.DEBUG, but strip verbose/debug/info
+# Log calls in release regardless so no PII-bearing string (URIs, device names) can leak
+# into the release dex even if a future call site forgets the guard. Warnings/errors are
+# kept for crash diagnostics (they carry no user-identifiable content here).
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
+
+# --- Room (Phase 4/5 DB-first catalog) --------------------------------------------
+# room-runtime ships consumer rules; restated defensively for the generated *_Impl.
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-dontwarn androidx.room.paging.**

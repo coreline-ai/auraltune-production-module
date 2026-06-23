@@ -1,28 +1,25 @@
 // AutoEqViewModelFactory.kt
-// Manual ViewModelProvider.Factory so we can inject :audio-engine + :autoeq-data + SettingsStore
-// + DeviceAutoEqManager without pulling in Hilt for the MVP. The factory holds references for
-// the lifetime of the host Composable; the produced ViewModel takes ownership.
+// Manual ViewModelProvider.Factory so we can build AutoEqViewModel from the Application
+// singleton without pulling in Hilt for the MVP.
+//
+// Phase 2 (dev-plan 110525): the ViewModel — not the host Composable — now OWNS the audio
+// stack (engine / MusicPlayerController / DeviceAutoEqManager). The factory therefore only
+// needs the Application; the ViewModel constructs and closes the stack itself, so it survives
+// configuration changes (rotation) and there is no dead-engine reference after recreation.
 package com.coreline.auraltune.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.coreline.audio.AudioEngine
-import com.coreline.autoeq.AutoEqApi
-import com.coreline.auraltune.audio.DeviceAutoEqManager
-import com.coreline.auraltune.data.SettingsStore
+import com.coreline.auraltune.AuralTuneApplication
 
 /**
- * Factory that constructs [AutoEqViewModel] with its collaborators.
+ * Factory that constructs [AutoEqViewModel] from the [AuralTuneApplication] singleton.
  *
- * P0-3: [deviceManager] is the single owner of writes to [AudioEngine.updateAutoEq];
- * the ViewModel never calls those engine methods directly. The factory passes the
- * manager through so the ViewModel can delegate UI selections to it.
+ * `create()` runs once per ViewModelStore (i.e. once for the Activity's retained scope), so
+ * the audio stack the ViewModel builds is created exactly once and retained across rotation.
  */
 class AutoEqViewModelFactory(
-    private val api: AutoEqApi,
-    private val settings: SettingsStore,
-    private val engine: AudioEngine,
-    private val deviceManager: DeviceAutoEqManager,
+    private val app: AuralTuneApplication,
 ) : ViewModelProvider.Factory {
 
     @Suppress("UNCHECKED_CAST")
@@ -30,6 +27,6 @@ class AutoEqViewModelFactory(
         require(modelClass.isAssignableFrom(AutoEqViewModel::class.java)) {
             "Unexpected ViewModel class $modelClass"
         }
-        return AutoEqViewModel(api, settings, engine, deviceManager) as T
+        return AutoEqViewModel(app) as T
     }
 }

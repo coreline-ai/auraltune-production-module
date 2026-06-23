@@ -62,8 +62,9 @@ Android 앱. Jaakko Pasanen의 **AutoEq** 보정 데이터를 받아, **자체 C
 - **`:audio-engine`** — Kotlin `AudioEngine` 래퍼 + C++ DSP. `src/main/cpp/{core,jni}/`.
 - **`:autoeq-data`** — 순수 Kotlin: AutoEq 카탈로그/프로파일 파서·캐시·리포지토리·검색.
 - **`:app`** — Compose UI + 오디오 파이프라인.
-  - `AudioPlayerService` (자체 AudioTrack 루프) — **TestTone 데모 전용**
-  - `MusicPlayerController` + `AuralTuneAudioProcessor` — **T1 음악 재생**(ExoPlayer → EQ)
+  - `MusicPlayerController` + `AuralTuneAudioProcessor` — **T1 음악 재생**(ExoPlayer → EQ). 유일한 재생 경로.
+  - (삭제됨) `AudioPlayerService`/`TestTone` — 테스트톤 전용이라 제거됨.
+  - `AutoEqViewModel` — 오디오 스택(engine/musicController/deviceManager) **소유자**(retained). `audio/eq/`=20밴드 그래픽 EQ.
 
 ### T1 신호 경로
 ```
@@ -81,10 +82,10 @@ Android 앱. Jaakko Pasanen의 **AutoEq** 보정 데이터를 받아, **자체 C
    `<android/log.h>`는 `#if defined(__ANDROID__)` 가드 + 호스트 no-op 패턴만 허용(현 코드 준수 중).
 3. **불변식 보존** — README의 13개 Correctness Invariants(pre-warp, TDF2, atomic publish,
    NaN guard, 16KB page 등) 회귀 금지. `-fno-finite-math-only`와 16KB 링커 플래그(`Align 0x4000`) 유지.
-4. **단일 엔진 / 배타 재생** — engine 인스턴스는 하나를 공유. TestTone과 음악은 **동시 재생 금지**
-   (둘 다 같은 audio thread에서 `engine.process`).
-5. **라이프사이클** — 오디오 스레드 stop→join 후에만 `engine.close()`. `onDispose`는 각 정리를
-   `runCatching`으로 감싸 `engine.close()`가 항상 실행되게 한다.
+4. **단일 엔진** — engine 인스턴스는 하나(retained `AutoEqViewModel` 소유)를 공유. 재생 경로는 ExoPlayer 단일.
+5. **라이프사이클** — 오디오 스택은 **retained `AutoEqViewModel`이 소유**하고 `onCleared()`에서
+   `deviceManager.close() → musicController.close() → engine.close()` 순으로 정리(각 사전단계 `runCatching`).
+   Compose `remember` 소유 금지(회전 시 dead engine 참조 방지 — Phase 2에서 해소).
 6. **PII 금지** — BT MAC / 파일명 / raw 프로파일 ID 로깅 금지(기기 키는 해시).
 7. **범위 준수** — 현재 워크스트림 범위 밖(특히 T3 구현)은 하지 않는다. 부수 이슈는 dev-plan
    "이슈 추적"에 기록만.
@@ -93,15 +94,18 @@ Android 앱. Jaakko Pasanen의 **AutoEq** 보정 데이터를 받아, **자체 C
 
 ## 5. 현재 진행 상황
 
+> 멀티 프론트엔드(T1/T2/T3) 워크스트림과 그래픽EQ/DB/release-gate 워크스트림이 병행됐다.
+> 후자의 상세·잔여는 `dev-plan/implement_20260622_110525.md` + `dev-plan/remaining_20260622.md` 참조.
 ```
-✅ Phase 0  코어 분리 (core/ ↔ jni/, CMake OBJECT+SHARED)   → main (b357687), push 완료
-✅ Phase 1  T1 내부앱 정밀 (Media3 ExoPlayer + AudioProcessor) → feat/t1-local-player, 실기기 검증 대기
-⬜ Phase 2  T2-OS 외부앱 근사 (MusicFX)                       → 다음 (선행 PoC 게이트)
+✅ Phase 0  코어 분리 (core/ ↔ jni/, CMake OBJECT+SHARED)   → main
+✅ Phase 1  T1 내부앱 정밀 (Media3 ExoPlayer + AudioProcessor) → 실기기 3종 검증(S25/PD20/SP4000T)
+✅ 그래픽EQ 20밴드 + preset + Room DB-first(catalog/profile) + release gate → 실기기 검증
+✅ 회전 버그 — RESOLVED(Phase 2: 오디오 스택을 retained ViewModel 소유로 이전)
+⬜ Phase 2(T2-OS) 외부앱 근사 (MusicFX)                       → probe(AudioFxSessionProbe)만 존재, 본구현 대기
 ⏸ Phase F  T3 HAL 글로벌                                      → 보류 (코어 구조만 준비됨)
-★ 별도     회전 버그(구성 변경 시 ViewModel↔엔진 불일치)        → 별도 워크스트림 (T1 차단요소 아님)
 ```
 
-확정된 결정: D1 회전버그=별도 · D2 디코더=ExoPlayer(로컬파일만) · D3 내부 AudioEffect=A/B검증한정(택일) ·
+확정된 결정: D1 회전버그=**해소(retained VM)** · D2 디코더=ExoPlayer(로컬파일만) · D3 내부 AudioEffect=A/B검증한정(택일) ·
 D4 근사밴드=DynamicsProcessing 10–15 · D5 T2=베타(PoC 후 정식화).
 
 ---
@@ -114,7 +118,7 @@ CMake 3.22.1+ · Gradle 8.9. `local.properties`에 `sdk.dir` 설정(gitignored).
 
 ### 단위 + 빌드 게이트
 ```bash
-./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest   # 현재 143 PASS
+./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :app:testDebugUnitTest   # 180 PASS (71/96/13)
 ./gradlew :app:assembleDebug :app:assembleRelease
 ```
 

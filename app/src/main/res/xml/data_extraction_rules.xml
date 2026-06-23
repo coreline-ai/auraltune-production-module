@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  사용자 결정(2026-06-23): 프라이버시 우선 — 백업/전송 전면 차단.
+  per-device AutoEQ 선택·device-key 해시·EQ 프리셋 등 사용자 데이터가
+  클라우드 백업(cloud-backup) 또는 기기간 직접전송(device-transfer)으로
+  외부에 나가지 않도록 한다. (android:allowBackup="false" 와 belt-and-suspenders)
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

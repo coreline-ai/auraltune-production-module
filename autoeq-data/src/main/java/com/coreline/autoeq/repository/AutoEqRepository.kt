@@ -5,6 +5,9 @@ import android.util.Log
 import com.coreline.autoeq.cache.CatalogCache
 import com.coreline.autoeq.cache.ImportedProfileStore
 import com.coreline.autoeq.cache.ProfileCache
+import com.coreline.autoeq.db.AutoEqDatabase
+import com.coreline.autoeq.db.CatalogStore
+import com.coreline.autoeq.db.ProfileStore
 import com.coreline.autoeq.model.AutoEqCatalogEntry
 import com.coreline.autoeq.model.AutoEqProfile
 import com.coreline.autoeq.model.CatalogState
@@ -24,11 +27,14 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.Closeable
 import java.io.File
 import java.io.IOException
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
@@ -51,6 +57,15 @@ class AutoEqRepository(
     private val httpClient: OkHttpClient = defaultHttpClient(),
     private val catalogCache: CatalogCache = CatalogCache(File(context.filesDir, "autoeq")),
     private val profileCache: ProfileCache = ProfileCache(File(context.filesDir, "autoeq")),
+    /** Phase 4: DB-first catalog store (Room). Seeds offline from a bundled INDEX.md. */
+    private val catalogStore: CatalogStore = CatalogStore(
+        dao = AutoEqDatabase.get(context).catalogDao(),
+        assets = context.assets,
+    ),
+    /** Phase 5: DB-first profile store (Room). Stores parsed header+filters, not raw text. */
+    private val profileStore: ProfileStore = ProfileStore(
+        dao = AutoEqDatabase.get(context).profileDao(),
+    ),
     private val importedStore: ImportedProfileStore =
         ImportedProfileStore(File(context.filesDir, "autoeq")),
     private val telemetry: AutoEqTelemetry = AutoEqTelemetry.NoOp,
@@ -102,29 +117,45 @@ class AutoEqRepository(
      *    downgrade to `Error` while serviceable cache is in memory).
      */
     fun loadCatalog(scope: CoroutineScope): Flow<CatalogState> = callbackFlow {
-        var hasServedCache = false
+        // Phase 4 DB-first: seed offline from the bundled INDEX.md on first run, migrate any
+        // legacy catalog.json, then serve the DB immediately (works with no network).
+        val dbEntries = withContext(Dispatchers.IO) {
+            runCatching {
+                val now = System.currentTimeMillis()
+                catalogStore.seedIfNeeded(now)
+                if (catalogStore.count() == 0) {
+                    // One-shot migration of the legacy file cache, if present.
+                    catalogCache.loadCatalog()?.let { catalogStore.importLegacyIfEmpty(it, now) }
+                }
+                catalogStore.loadFromDb()
+            }.getOrElse { emptyList() }
+        }
 
-        val cached = catalogCache.loadCatalog()
-        if (cached != null) {
-            trySend(CatalogState.Loaded(cached))
-            hasServedCache = true
+        var hasServedDb = false
+        if (dbEntries.isNotEmpty()) {
+            trySend(CatalogState.Loaded(dbEntries))
+            hasServedDb = true
         } else {
             trySend(CatalogState.Loading)
         }
 
-        val needsRefresh = cached == null || catalogCache.isCatalogStale()
+        // Background refresh only when empty or stale (TTL). ETag makes "stale but unchanged"
+        // a cheap 304. Kill switch is honored inside refreshCatalog().
+        val needsRefresh = !hasServedDb || isCatalogStale()
         val job = if (needsRefresh) {
             scope.launch(Dispatchers.IO) {
-                val result = refreshCatalog()
-                result.onSuccess { entries ->
-                    trySend(CatalogState.Loaded(entries))
-                }.onFailure { err ->
-                    if (!hasServedCache) {
-                        trySend(CatalogState.Error(err.message ?: "Catalog fetch failed"))
-                    } else {
-                        Log.w(TAG, "Background refresh failed; keeping cached catalog: ${err.message}")
+                refreshCatalog()
+                    .onSuccess { entries ->
+                        // null = 304 Not Modified — DB already current, nothing to re-emit.
+                        if (entries != null) trySend(CatalogState.Loaded(entries))
                     }
-                }
+                    .onFailure { err ->
+                        if (!hasServedDb) {
+                            trySend(CatalogState.Error(err.message ?: "Catalog fetch failed"))
+                        } else {
+                            Log.w(TAG, "Background refresh failed; keeping DB catalog: ${err.message}")
+                        }
+                    }
             }
         } else {
             null
@@ -133,28 +164,36 @@ class AutoEqRepository(
         awaitClose { job?.cancel() }
     }
 
+    /** Catalog is stale when no sync has happened or the last one is older than the TTL. */
+    private suspend fun isCatalogStale(): Boolean {
+        val last = catalogStore.syncState()?.lastSyncAtMs ?: return true
+        return System.currentTimeMillis() - last > CATALOG_TTL_MS
+    }
+
     /**
-     * One-shot refresh: GET INDEX.md, parse, persist, return entries.
+     * One-shot refresh: conditional GET INDEX.md (If-None-Match), parse, upsert into the DB.
      *
-     * On HTTP / parse / IO failure the existing cache is left untouched.
+     * @return success(entries) on a fresh download, success(null) on 304 Not Modified,
+     *   failure on HTTP / parse / IO error (DB left untouched).
      */
-    suspend fun refreshCatalog(): Result<List<AutoEqCatalogEntry>> = withContext(Dispatchers.IO) {
+    suspend fun refreshCatalog(): Result<List<AutoEqCatalogEntry>?> = withContext(Dispatchers.IO) {
         if (killSwitchEngaged.get()) {
             return@withContext Result.failure(IOException("kill switch engaged"))
         }
         try {
-            val request = Request.Builder()
-                .url(INDEX_URL)
-                .get()
-                .build()
-            httpClient.newCall(request).execute().use { resp ->
+            val builder = Request.Builder().url(INDEX_URL).get()
+            catalogStore.syncState()?.etag?.let { builder.header("If-None-Match", it) }
+            httpClient.newCall(builder.build()).execute().use { resp ->
+                if (resp.code == 304) {
+                    catalogStore.markNotModified(System.currentTimeMillis())
+                    return@withContext Result.success(null)
+                }
                 if (!resp.isSuccessful) {
-                    val msg = "HTTP ${resp.code}"
                     telemetry.event(
                         "fetch_failed",
                         mapOf("kind" to "catalog", "http_code" to resp.code),
                     )
-                    return@withContext Result.failure(IOException(msg))
+                    return@withContext Result.failure(IOException("HTTP ${resp.code}"))
                 }
                 val body = resp.body?.string()
                     ?: return@withContext Result.failure(IOException("Empty body"))
@@ -163,7 +202,12 @@ class AutoEqRepository(
                     telemetry.event("parse_failed", mapOf("kind" to "catalog"))
                     return@withContext Result.failure(IOException("Catalog parse yielded no entries"))
                 }
-                catalogCache.saveCatalog(entries)
+                catalogStore.applyRemote(
+                    entries = entries,
+                    nowMs = System.currentTimeMillis(),
+                    etag = resp.header("ETag"),
+                    contentSha256 = CatalogStore.sha256(body),
+                )
                 Result.success(entries)
             }
         } catch (t: Throwable) {
@@ -333,25 +377,24 @@ class AutoEqRepository(
     }
 
     private suspend fun fetchProfileInternal(entry: AutoEqCatalogEntry): AutoEqProfile? {
-        // 1. Cache.
-        val cached = profileCache.read(entry.id)
-        if (cached != null) {
-            val parsed = ParametricEqParser.parse(
-                text = cached,
-                name = entry.name,
-                id = entry.id,
-                measuredBy = entry.measuredBy,
-            )
-            when (parsed) {
-                is ParseResult.Success -> return parsed.profile
+        val now = System.currentTimeMillis()
+
+        // 1. DB hit (Phase 5) — parsed header+filters, no network.
+        profileStore.read(entry.id, now)?.let { return it }
+
+        // 1b. One-shot migration of any legacy raw-text cache into the DB.
+        val legacy = profileCache.read(entry.id)
+        if (legacy != null) {
+            when (val parsed = parseProfile(entry, legacy)) {
+                is ParseResult.Success -> {
+                    profileStore.upsert(parsed.profile, buildProfileUrl(entry), CatalogStore.sha256(legacy), now)
+                    profileCache.delete(entry.id) // migrated — DB is now the store
+                    return parsed.profile
+                }
                 is ParseResult.Failure -> {
-                    // Corrupt cache — drop and re-fetch.
-                    Log.w(TAG, "Cached profile ${entry.id} failed to parse; re-fetching")
+                    Log.w(TAG, "Legacy cached profile ${entry.id} failed to parse; re-fetching")
                     profileCache.delete(entry.id)
-                    telemetry.event(
-                        "parse_failed",
-                        mapOf("kind" to "profile_cache", "id" to entry.id),
-                    )
+                    telemetry.event("parse_failed", mapOf("kind" to "profile_cache", "id" to entry.id))
                 }
             }
         }
@@ -393,16 +436,12 @@ class AutoEqRepository(
             null
         } ?: return null
 
-        val parsed = ParametricEqParser.parse(
-            text = text,
-            name = entry.name,
-            id = entry.id,
-            measuredBy = entry.measuredBy,
-        )
-        return when (parsed) {
+        return when (val parsed = parseProfile(entry, text)) {
             is ParseResult.Success -> {
-                profileCache.write(entry.id, text)
-                profileCache.evictIfNeeded(protectedIds.get())
+                // Upsert into the DB (replaceProfile is a transaction — no partial rows on
+                // failure). Then trim the LRU. Raw text is intentionally NOT persisted.
+                profileStore.upsert(parsed.profile, url, CatalogStore.sha256(text), now)
+                profileStore.evictIfNeeded(protectedIds.get())
                 parsed.profile
             }
             is ParseResult.Failure -> {
@@ -414,6 +453,14 @@ class AutoEqRepository(
             }
         }
     }
+
+    private fun parseProfile(entry: AutoEqCatalogEntry, text: String): ParseResult =
+        ParametricEqParser.parse(
+            text = text,
+            name = entry.name,
+            id = entry.id,
+            measuredBy = entry.measuredBy,
+        )
 
     /** Build the upstream URL for this catalog entry's `ParametricEQ.txt`. */
     internal fun buildProfileUrl(entry: AutoEqCatalogEntry): String {
@@ -459,6 +506,86 @@ class AutoEqRepository(
     }
 
     /**
+     * Phase 4b/5 — INCREMENTAL update (추가분만 갱신). Compares the locally-recorded AutoEq git
+     * commit against upstream HEAD; if changed, fetches ONLY the changed files via the GitHub
+     * compare API (not the whole catalog), applies them, and records the new commit.
+     *
+     * Flow: localCommit → HEAD (1 API call). Equal → [DeltaResult.NoChange] (zero downloads).
+     * Different → compare (1 API call) → for each changed ParametricEQ.txt file: added/modified →
+     * fetch+parse+upsert that one profile; removed → delete it. Catalog membership is reconciled
+     * from a fresh INDEX.md (adds/tombstones). Honors the kill switch.
+     */
+    suspend fun syncDelta(): DeltaResult = withContext(Dispatchers.IO) {
+        if (killSwitchEngaged.get()) return@withContext DeltaResult.Failed("kill switch engaged")
+        val now = System.currentTimeMillis()
+        val local = catalogStore.autoEqCommit()
+        val head = runCatching {
+            httpGet("$GITHUB_API/commits/master", GITHUB_ACCEPT)?.let { json.decodeFromString<GhCommit>(it).sha }
+        }.getOrNull() ?: return@withContext DeltaResult.Failed("HEAD fetch failed")
+
+        if (local == head) return@withContext DeltaResult.NoChange
+        if (local == null) {
+            // No base commit to diff from (e.g. legacy DB): adopt HEAD; on-demand fetch covers gaps.
+            catalogStore.setAutoEqCommit(head, now)
+            return@withContext DeltaResult.NoChange
+        }
+
+        val compare = runCatching {
+            httpGet("$GITHUB_API/compare/$local...$head", GITHUB_ACCEPT)?.let { json.decodeFromString<GhCompare>(it) }
+        }.getOrNull() ?: return@withContext DeltaResult.Failed("compare fetch failed")
+
+        // GitHub's compare API caps files[] at 300. A delta that large (e.g. a long-offline
+        // install) would silently drop the overflow — so DON'T advance the commit; signal the
+        // caller to do a full resync instead of half-applying and losing the rest.
+        if (compare.files.size >= GITHUB_COMPARE_FILE_CAP) {
+            return@withContext DeltaResult.Failed("delta too large (>= $GITHUB_COMPARE_FILE_CAP files) — full resync required")
+        }
+
+        // Reconcile catalog membership from a fresh INDEX (adds new + tombstones removed).
+        runCatching {
+            httpGet(INDEX_URL, null)?.let { idx ->
+                val entries = IndexMdParser.parse(idx)
+                if (entries.isNotEmpty()) catalogStore.applyRemote(entries, now, null, CatalogStore.sha256(idx))
+            }
+        }
+
+        val byRel = catalogStore.loadFromDb().associateBy { it.relativePath }
+        var changed = 0
+        var removed = 0
+        for (f in compare.files) {
+            if (!f.filename.endsWith("ParametricEQ.txt")) continue
+            // compare filename may percent-encode non-ASCII / '+'; catalog relativePath was
+            // URL-decoded by IndexMdParser. Try raw, then decoded, so non-ASCII paths match.
+            val rawRel = f.filename.removePrefix("results/").substringBeforeLast('/')
+            val entry = byRel[rawRel]
+                ?: byRel[runCatching { URLDecoder.decode(rawRel, "UTF-8") }.getOrNull()]
+                ?: continue
+            if (f.status == "removed") {
+                profileStore.delete(entry.id); removed++; continue
+            }
+            val url = buildProfileUrl(entry)
+            val txt = runCatching { httpGet(url, null) }.getOrNull() ?: continue
+            when (val p = parseProfile(entry, txt)) {
+                is ParseResult.Success -> {
+                    profileStore.upsert(p.profile, url, CatalogStore.sha256(txt), now); changed++
+                }
+                else -> {}
+            }
+        }
+        catalogStore.setAutoEqCommit(head, now)
+        DeltaResult.Updated(changedProfiles = changed, removedProfiles = removed, toCommit = head)
+    }
+
+    /** Simple GET → body string (or null). [accept] sets the Accept header (GitHub API). */
+    private fun httpGet(url: String, accept: String?): String? {
+        val builder = Request.Builder().url(url).get()
+        if (accept != null) builder.header("Accept", accept)
+        return httpClient.newCall(builder.build()).execute().use { resp ->
+            if (resp.isSuccessful) resp.body?.string() else null
+        }
+    }
+
+    /**
      * R1-4: cancel every in-flight profile fetch and stop accepting new ones.
      *
      * Callers in long-running services (foreground audio service, app process)
@@ -483,6 +610,16 @@ class AutoEqRepository(
 
     companion object {
         private const val TAG = "AutoEq[Repository]"
+
+        /** Catalog refresh TTL — background re-fetch only after this since the last sync. */
+        const val CATALOG_TTL_MS: Long = 7L * 24L * 60L * 60L * 1000L
+
+        /** GitHub REST API base for delta sync (commits / compare). */
+        const val GITHUB_API: String = "https://api.github.com/repos/jaakkopasanen/AutoEq"
+        private const val GITHUB_ACCEPT = "application/vnd.github+json"
+        /** GitHub compare API truncates files[] at 300; beyond this we full-resync, not delta. */
+        private const val GITHUB_COMPARE_FILE_CAP = 300
+        private val json = Json { ignoreUnknownKeys = true }
 
         /** Upstream INDEX.md URL. */
         const val INDEX_URL: String =
@@ -512,3 +649,22 @@ class AutoEqRepository(
             .build()
     }
 }
+
+/** Result of an incremental ([AutoEqRepository.syncDelta]) update. */
+sealed interface DeltaResult {
+    /** Upstream commit unchanged — no downloads performed. */
+    data object NoChange : DeltaResult
+    /** Applied a delta: [changedProfiles] upserted, [removedProfiles] deleted; DB now at [toCommit]. */
+    data class Updated(val changedProfiles: Int, val removedProfiles: Int, val toCommit: String) : DeltaResult
+    data class Failed(val reason: String) : DeltaResult
+}
+
+// GitHub REST API DTOs (only the fields delta sync needs; ignoreUnknownKeys handles the rest).
+@Serializable
+private data class GhCommit(val sha: String)
+
+@Serializable
+private data class GhCompare(val files: List<GhFile> = emptyList())
+
+@Serializable
+private data class GhFile(val filename: String, val status: String)

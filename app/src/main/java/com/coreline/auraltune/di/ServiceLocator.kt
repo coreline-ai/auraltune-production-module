@@ -32,7 +32,7 @@ class ServiceLocator(context: Context) {
 
     /**
      * Build a new [AudioEngine] for a playback session. Callers MUST close the returned
-     * instance after the audio thread has joined — see [com.coreline.auraltune.audio.AudioPlayerService].
+     * instance after the audio thread has joined — see [com.coreline.auraltune.audio.MusicPlayerController].
      */
     fun createAudioEngine(sampleRate: Int = DEFAULT_SAMPLE_RATE): AudioEngine =
         AudioEngine(sampleRate)

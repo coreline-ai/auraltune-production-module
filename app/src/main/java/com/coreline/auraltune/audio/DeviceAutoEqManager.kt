@@ -22,6 +22,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.coreline.auraltune.BuildConfig
 import com.coreline.audio.AudioEngine
 import com.coreline.autoeq.AutoEqApi
 import com.coreline.autoeq.cache.ImportedProfileStore
@@ -73,9 +74,9 @@ class DeviceAutoEqManager(
     /** Last device key we successfully reconciled to, for debounce. */
     private var lastKey: DeviceKey? = null
 
-    // (lastSampleRate removed in P0-2 — engine sample rate is the
-    //  AudioPlayerService configured rate; route detection no longer drives
-    //  engine.updateSampleRate.)
+    // (lastSampleRate removed in P0-2 — engine sample rate is the rate the
+    //  playback path (MusicPlayerController / its AudioProcessor) feeds; route
+    //  detection no longer drives engine.updateSampleRate.)
 
     /** Job for the in-flight profile resolution after route change. */
     private var resolveJob: Job? = null
@@ -141,7 +142,9 @@ class DeviceAutoEqManager(
      */
     suspend fun selectProfileForCurrentDevice(entry: AutoEqCatalogEntry): Boolean {
         val key = lastKey
-        Log.i(TAG, "selectProfile: '${entry.name}' key=${key?.displayName} eligible=${key?.supportsAutoEq}")
+        if (BuildConfig.DEBUG) {
+            Log.i(TAG, "selectProfile: '${entry.name}' key=${key?.displayName} eligible=${key?.supportsAutoEq}")
+        }
         // Always persist the global "selectedProfileId" so post-restart restore works
         // even when no device is currently routed.
         settings.setSelectedProfileId(entry.id)
@@ -210,7 +213,9 @@ class DeviceAutoEqManager(
             gainsDB = gains,
             qFactors = qs,
         )
-        Log.i(TAG, "pushToEngine: applied $n filters, preamp=${p.preampDB}")
+        if (BuildConfig.DEBUG) {
+            Log.i(TAG, "pushToEngine: applied $n filters, preamp=${p.preampDB}")
+        }
     }
 
     /**
@@ -242,25 +247,27 @@ class DeviceAutoEqManager(
         // (a) Sample-rate update — DELIBERATELY DISABLED for MVP (P0-2).
         //
         // Rationale: AudioDeviceInfo.sampleRates lists the rates a device
-        // CAN support, not the rate the current AudioTrack stream is
-        // ACTUALLY using. AudioPlayerService creates AudioTrack at engine
-        // construction time and never reconfigures it; if we silently call
-        // engine.updateSampleRate(routeRate) here, the engine's coefficient
-        // pre-warp targets a rate that doesn't match the PCM rate we're
-        // actually feeding it, and AutoEQ center frequencies drift.
+        // CAN support, not the rate the current playback stream is ACTUALLY
+        // using. The engine sample rate is driven by the playback path
+        // (MusicPlayerController's AudioProcessor reports its stream rate), not
+        // by route detection; if we silently call engine.updateSampleRate(
+        // routeRate) here, the engine's coefficient pre-warp targets a rate
+        // that doesn't match the PCM rate we're actually feeding it, and
+        // AutoEQ center frequencies drift.
         //
-        // The right fix is a coordinated stop → AudioTrack rebuild → engine
-        // updateSampleRate sequence, which is post-MVP work. Until then,
-        // engine sample rate stays locked to AudioPlayerService's
-        // configured rate (typically 48000 Hz, which Android up-mixes /
-        // resamples to whatever the route needs).
+        // So route detection deliberately does NOT touch the sample rate — the
+        // playback path owns it (the AudioProcessor reconfigures the engine to
+        // the decoded stream rate, e.g. 44100/48000).
 
         // (b) Device-key change → reapply / clear profile.
         if (lastKey?.raw != key.raw) {
             lastKey = key
             currentDeviceHash = key.stableHash()
-            Log.i(TAG, "route → ${key.displayName} (eligible=${key.supportsAutoEq}, " +
-                "hash=${key.stableHash()})")
+            if (BuildConfig.DEBUG) {
+                // displayName can be a BT/USB product name (user-identifiable) — debug-only.
+                Log.i(TAG, "route → ${key.displayName} (eligible=${key.supportsAutoEq}, " +
+                    "hash=${key.stableHash()})")
+            }
 
             if (!key.supportsAutoEq) {
                 resolveJob?.cancel()

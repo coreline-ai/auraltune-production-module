@@ -1,9 +1,13 @@
 package com.coreline.autoeq.repository
 
 import android.content.Context
+import androidx.room.Room
 import com.coreline.autoeq.cache.CatalogCache
 import com.coreline.autoeq.cache.ImportedProfileStore
 import com.coreline.autoeq.cache.ProfileCache
+import com.coreline.autoeq.db.AutoEqDatabase
+import com.coreline.autoeq.db.CatalogStore
+import com.coreline.autoeq.db.ProfileStore
 import com.coreline.autoeq.model.AutoEqCatalogEntry
 import io.mockk.coVerify
 import io.mockk.every
@@ -34,6 +38,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.File
 import java.nio.file.Files
@@ -65,16 +70,23 @@ class AutoEqRepositoryTest {
 
     private lateinit var rootDir: File
     private lateinit var ctx: Context
+    private lateinit var db: AutoEqDatabase
 
     @Before
     fun setUp() {
         rootDir = Files.createTempDirectory("autoeq-repo-test").toFile()
         ctx = mockk(relaxed = true)
         every { ctx.filesDir } returns File(rootDir, "ctx-files").apply { mkdirs() }
+        // Phase 5: real in-memory Room DB so the repository's DB-first profile path works
+        // without touching the mock context (which can't back Room).
+        db = Room.inMemoryDatabaseBuilder(RuntimeEnvironment.getApplication(), AutoEqDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
     }
 
     @After
     fun tearDown() {
+        db.close()
         rootDir.deleteRecursively()
     }
 
@@ -207,6 +219,46 @@ class AutoEqRepositoryTest {
             "Coalescing must reduce 4 concurrent fetchProfile calls to 1 HTTP request",
             1, callCount.get(),
         )
+    }
+
+    // ---------- Phase 5: DB-first profile storage ----------
+
+    @Test
+    fun `second fetchProfile is served from DB with no extra network call`() = runBlocking {
+        val callCount = AtomicInteger(0)
+        val repo = newRepository(clientReturning(SAMPLE_PROFILE_TEXT) { callCount.incrementAndGet() })
+        val entry = entryOf("DB Hit", "x/y/DBHit")
+
+        val first = repo.fetchProfile(entry)
+        val second = repo.fetchProfile(entry)
+
+        assertNotNull("First fetch resolves", first)
+        assertNotNull("Second fetch resolves from DB", second)
+        assertEquals("Only the first fetch hits the network; second is a DB hit", 1, callCount.get())
+        assertEquals(first!!.filters.size, second!!.filters.size)
+    }
+
+    @Test
+    fun `malformed profile resolves null and stores no DB row`() = runBlocking {
+        val callCount = AtomicInteger(0)
+        val repo = newRepository(clientReturning("garbage not a parametric eq") { callCount.incrementAndGet() })
+        val entry = entryOf("Bad", "x/y/Bad")
+
+        assertNull("Malformed profile must not resolve", repo.fetchProfile(entry))
+        // No DB row was written → a second call must hit the network again (not a phantom DB hit).
+        assertNull(repo.fetchProfile(entry))
+        assertEquals("No partial DB row — both attempts go to network", 2, callCount.get())
+    }
+
+    @Test
+    fun `kill switch blocks profile network fetch`() = runBlocking {
+        val callCount = AtomicInteger(0)
+        val repo = newRepository(clientReturning(SAMPLE_PROFILE_TEXT) { callCount.incrementAndGet() })
+        repo.setKillSwitchEngaged(true)
+        val entry = entryOf("Killed", "x/y/Killed")
+
+        assertNull("Kill switch must block the network fetch", repo.fetchProfile(entry))
+        assertEquals("No network call when kill switch engaged", 0, callCount.get())
     }
 
     @Test
@@ -386,6 +438,8 @@ class AutoEqRepositoryTest {
             httpClient = clientReturning(""),
             catalogCache = catalogSpy,
             profileCache = ProfileCache(File(rootDir, "pc")),
+            catalogStore = CatalogStore(db.catalogDao(), RuntimeEnvironment.getApplication().assets),
+            profileStore = ProfileStore(db.profileDao()),
             importedStore = ImportedProfileStore(File(rootDir, "imp")),
         )
 
@@ -442,6 +496,8 @@ class AutoEqRepositoryTest {
         httpClient = client,
         catalogCache = CatalogCache(File(rootDir, "cat")),
         profileCache = ProfileCache(File(rootDir, "pc")),
+        catalogStore = CatalogStore(db.catalogDao(), RuntimeEnvironment.getApplication().assets),
+        profileStore = ProfileStore(db.profileDao()),
         importedStore = ImportedProfileStore(File(rootDir, "imp")),
     )
 

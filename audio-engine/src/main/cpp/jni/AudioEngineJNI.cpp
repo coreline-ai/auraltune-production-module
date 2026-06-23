@@ -18,6 +18,7 @@
 #include <new>
 
 #include "AuralTuneEQEngine.h"
+#include "PcmConvert.h"
 
 using auraltune::audio::AuralTuneEQEngine;
 
@@ -238,9 +239,12 @@ JNIEXPORT void JNICALL
 Java_com_coreline_audio_AudioEngine_nativeSetAutoEqEnabled(JNIEnv* /*env*/,
                                                            jobject /*thiz*/,
                                                            jlong handle,
-                                                           jboolean enabled) {
+                                                           jboolean enabled,
+                                                           jboolean immediate) {
     auto* engine = fromHandle(handle);
-    if (engine != nullptr) engine->setAutoEqEnabled(enabled == JNI_TRUE);
+    if (engine != nullptr) {
+        engine->setAutoEqEnabled(enabled == JNI_TRUE, immediate == JNI_TRUE);
+    }
 }
 
 JNIEXPORT void JNICALL
@@ -376,6 +380,43 @@ Java_com_coreline_audio_AudioEngine_nativeProcessDirectBuffer(JNIEnv* env,
     if (capacity < required) return -6;
 
     return engine->process(static_cast<float*>(addr), numFrames);
+}
+
+// ---------------------------------------------------------------------------
+// nativeProcessFormatted — format-agnostic process (16/24/32-int + float I/O).
+// in/out are direct ByteBuffers; formats are PcmFormat ordinals (S16=0,S24=1,S32=2,F32=3).
+// ---------------------------------------------------------------------------
+JNIEXPORT jint JNICALL
+Java_com_coreline_audio_AudioEngine_nativeProcessFormatted(JNIEnv* env,
+                                                           jobject /*thiz*/,
+                                                           jlong handle,
+                                                           jobject inBuffer,
+                                                           jint inFormat,
+                                                           jobject outBuffer,
+                                                           jint outFormat,
+                                                           jint numFrames) {
+    auto* engine = fromHandle(handle);
+    if (engine == nullptr) return -1;
+    if (inBuffer == nullptr || outBuffer == nullptr) return -2;
+    if (numFrames < 1 || numFrames > kMaxProcessFrames) return -3;
+    if (!auraltune::isValidPcmFormat(inFormat) || !auraltune::isValidPcmFormat(outFormat)) return -7;
+
+    void* inAddr = env->GetDirectBufferAddress(inBuffer);
+    void* outAddr = env->GetDirectBufferAddress(outBuffer);
+    if (inAddr == nullptr || outAddr == nullptr) return -4;
+
+    const jlong inCap = env->GetDirectBufferCapacity(inBuffer);
+    const jlong outCap = env->GetDirectBufferCapacity(outBuffer);
+    if (inCap < 0 || outCap < 0) return -5;
+
+    const jlong frames = static_cast<jlong>(numFrames) * 2;  // stereo
+    const jlong inReq = frames * auraltune::bytesPerSample(static_cast<auraltune::PcmFormat>(inFormat));
+    const jlong outReq = frames * auraltune::bytesPerSample(static_cast<auraltune::PcmFormat>(outFormat));
+    if (inCap < inReq || outCap < outReq) return -6;
+
+    return engine->processFormatted(
+        static_cast<const uint8_t*>(inAddr), inFormat,
+        static_cast<uint8_t*>(outAddr), outFormat, numFrames);
 }
 
 // ---------------------------------------------------------------------------

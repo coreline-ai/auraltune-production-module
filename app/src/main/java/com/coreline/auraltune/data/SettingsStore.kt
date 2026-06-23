@@ -8,13 +8,17 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.coreline.autoeq.model.AutoEqCatalogEntry
 import com.coreline.autoeq.model.AutoEqSelection
+import com.coreline.auraltune.audio.eq.GraphicEqBands
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
 import kotlinx.serialization.json.Json
@@ -103,17 +107,154 @@ class SettingsStore(context: Context) {
         store.edit { prefs -> prefs[KEY_KILL_SWITCH] = engaged }
     }
 
+    // ----------------- Graphic EQ: current gains (auto save/restore) -----------------
+    /** Live 20-band gains; restored on launch. Always normalized to [GraphicEqBands.COUNT]. */
+    val currentGraphicEqGains: Flow<FloatArray> =
+        store.data.map { prefs ->
+            prefs[KEY_CURRENT_GEQ_GAINS]?.let { decodeGains(it) } ?: FloatArray(GraphicEqBands.COUNT)
+        }
+
+    suspend fun setCurrentGraphicEqGains(gains: FloatArray) {
+        store.edit { it[KEY_CURRENT_GEQ_GAINS] = encodeGains(gains) }
+    }
+
+    // ----------------- Graphic EQ: gain limit (±dB) + preamp graph overlay -----------------
+    /** Selectable slider limit (±dB). Coerced to a valid [GraphicEqBands.GAIN_LIMIT_OPTIONS] value. */
+    val graphicEqGainLimitDb: Flow<Float> =
+        store.data.map { prefs ->
+            val raw = prefs[KEY_GEQ_GAIN_LIMIT] ?: GraphicEqBands.MAX_GAIN_DB
+            // Snap to the nearest allowed option so a stale/invalid value can't widen the range.
+            GraphicEqBands.GAIN_LIMIT_OPTIONS.minByOrNull { kotlin.math.abs(it - raw) }
+                ?: GraphicEqBands.MAX_GAIN_DB
+        }
+
+    suspend fun setGraphicEqGainLimitDb(limitDb: Float) {
+        store.edit { it[KEY_GEQ_GAIN_LIMIT] = limitDb }
+    }
+
+    /** Whether the response graph overlays the active profile's preamp as a reference line. */
+    val showPreampOnGraph: Flow<Boolean> =
+        store.data.map { it[KEY_GEQ_SHOW_PREAMP] ?: DEFAULT_SHOW_PREAMP }
+
+    suspend fun setShowPreampOnGraph(show: Boolean) {
+        store.edit { it[KEY_GEQ_SHOW_PREAMP] = show }
+    }
+
+    // ----------------- Graphic EQ: named presets -----------------
+    val graphicEqPresets: Flow<List<GraphicEqPreset>> =
+        store.data.map { prefs ->
+            prefs[KEY_GEQ_PRESETS]?.let { decodePresets(it) } ?: emptyList()
+        }
+
+    val selectedGraphicEqPresetId: Flow<String?> =
+        store.data.map { it[KEY_SELECTED_GEQ_PRESET] }
+
+    suspend fun setSelectedGraphicEqPresetId(id: String?) {
+        store.edit { prefs ->
+            if (id == null) prefs.remove(KEY_SELECTED_GEQ_PRESET) else prefs[KEY_SELECTED_GEQ_PRESET] = id
+        }
+    }
+
+    /** Insert or replace a preset by id (gains are normalized before storing). */
+    suspend fun upsertGraphicEqPreset(preset: GraphicEqPreset) {
+        store.edit { prefs ->
+            val current = prefs[KEY_GEQ_PRESETS]?.let { decodePresets(it) }.orEmpty()
+            val normalized = preset.copy(gainsDb = normalizeGains(preset.gainsDb.toFloatArray()).toList())
+            val updated = current.filter { it.id != preset.id } + normalized
+            prefs[KEY_GEQ_PRESETS] = encodePresets(updated)
+        }
+    }
+
+    suspend fun deleteGraphicEqPreset(id: String) {
+        store.edit { prefs ->
+            val current = prefs[KEY_GEQ_PRESETS]?.let { decodePresets(it) }.orEmpty()
+            prefs[KEY_GEQ_PRESETS] = encodePresets(current.filter { it.id != id })
+            if (prefs[KEY_SELECTED_GEQ_PRESET] == id) prefs.remove(KEY_SELECTED_GEQ_PRESET)
+        }
+    }
+
+    // ----------------- Recent / quick-pick profiles (spinner) -----------------
+    /** Most-recently-selected catalog entries (most recent first), capped at [MAX_RECENT]. */
+    val recentProfiles: Flow<List<AutoEqCatalogEntry>> =
+        store.data.map { prefs -> prefs[KEY_RECENT_PROFILES]?.let { decodeRecents(it) } ?: emptyList() }
+
+    /** Prepend [entry] (dedup by id), cap at [MAX_RECENT]. */
+    suspend fun addRecentProfile(entry: AutoEqCatalogEntry) {
+        store.edit { prefs ->
+            val cur = prefs[KEY_RECENT_PROFILES]?.let { decodeRecents(it) }.orEmpty()
+            val updated = (listOf(entry) + cur.filter { it.id != entry.id }).take(MAX_RECENT)
+            prefs[KEY_RECENT_PROFILES] = encodeRecents(updated)
+        }
+    }
+
+    /** Replace the whole list. */
+    suspend fun setRecentProfiles(list: List<AutoEqCatalogEntry>) {
+        store.edit { it[KEY_RECENT_PROFILES] = encodeRecents(list.take(MAX_RECENT)) }
+    }
+
+    /**
+     * One-time pre-seed. Writes [list] ONLY if no recents key exists yet — the empty-check and the
+     * write happen inside the same [store.edit] block (DataStore serializes writers), so a concurrent
+     * [addRecentProfile] from a user tap can never be clobbered: whichever transaction commits first
+     * sets the key, and the other sees it non-null (seed → no-op; add → prepend onto seeded list).
+     * Returns true iff it actually seeded.
+     */
+    suspend fun seedRecentProfilesIfEmpty(list: List<AutoEqCatalogEntry>): Boolean {
+        var seeded = false
+        store.edit { prefs ->
+            if (prefs[KEY_RECENT_PROFILES] == null && list.isNotEmpty()) {
+                prefs[KEY_RECENT_PROFILES] = encodeRecents(list.take(MAX_RECENT))
+                seeded = true
+            }
+        }
+        return seeded
+    }
+
     // ----------------- Internals -----------------
+    private fun encodeRecents(list: List<AutoEqCatalogEntry>): String =
+        json.encodeToString(recentsSerializer, list)
+
+    private fun decodeRecents(raw: String): List<AutoEqCatalogEntry> =
+        runCatching { json.decodeFromString(recentsSerializer, raw) }.getOrElse { emptyList() }
+
     private fun encodeSelections(map: Map<String, AutoEqSelection>): String =
         json.encodeToString(selectionsSerializer, map)
 
     private fun decodeSelections(raw: String): Map<String, AutoEqSelection> =
         runCatching { json.decodeFromString(selectionsSerializer, raw) }.getOrElse { emptyMap() }
 
+    private fun encodeGains(gains: FloatArray): String =
+        json.encodeToString(gainsSerializer, normalizeGains(gains).toList())
+
+    private fun decodeGains(raw: String): FloatArray =
+        runCatching { normalizeGains(json.decodeFromString(gainsSerializer, raw).toFloatArray()) }
+            .getOrElse { FloatArray(GraphicEqBands.COUNT) }
+
+    private fun encodePresets(list: List<GraphicEqPreset>): String =
+        json.encodeToString(presetsSerializer, list)
+
+    private fun decodePresets(raw: String): List<GraphicEqPreset> =
+        runCatching { json.decodeFromString(presetsSerializer, raw) }.getOrElse { emptyList() }
+
+    /**
+     * Defensive: fix length to COUNT, drop NaN/Inf → 0, clamp to the absolute ceiling
+     * (±[GraphicEqBands.MAX_GAIN_LIMIT_DB], not the live user limit) so gains saved while a
+     * wider limit was active survive a round-trip. The live limit is enforced at edit time.
+     */
+    private fun normalizeGains(gains: FloatArray): FloatArray {
+        val n = GraphicEqBands.COUNT
+        val max = GraphicEqBands.MAX_GAIN_LIMIT_DB
+        return FloatArray(n) { i ->
+            val v = gains.getOrElse(i) { 0f }
+            if (v.isFinite()) v.coerceIn(-max, max) else 0f
+        }
+    }
+
     companion object {
         const val DEFAULT_AUTOEQ_ENABLED = true
         const val DEFAULT_PREAMP_ENABLED = true
         const val DEFAULT_KILL_SWITCH_ENGAGED = false
+        const val DEFAULT_SHOW_PREAMP = true
 
         private val KEY_SELECTED_PROFILE_ID = stringPreferencesKey("selected_profile_id")
         private val KEY_AUTOEQ_ENABLED = booleanPreferencesKey("autoeq_enabled")
@@ -121,6 +262,15 @@ class SettingsStore(context: Context) {
         private val KEY_FAVORITE_IDS = stringSetPreferencesKey("favorite_profile_ids")
         private val KEY_PER_DEVICE_SELECTIONS = stringPreferencesKey("per_device_selections_json")
         private val KEY_KILL_SWITCH = booleanPreferencesKey("kill_switch_engaged")
+        private val KEY_CURRENT_GEQ_GAINS = stringPreferencesKey("graphic_eq_current_gains_json")
+        private val KEY_GEQ_PRESETS = stringPreferencesKey("graphic_eq_presets_json")
+        private val KEY_SELECTED_GEQ_PRESET = stringPreferencesKey("graphic_eq_selected_preset_id")
+        private val KEY_GEQ_GAIN_LIMIT = floatPreferencesKey("graphic_eq_gain_limit_db")
+        private val KEY_GEQ_SHOW_PREAMP = booleanPreferencesKey("graphic_eq_show_preamp")
+        private val KEY_RECENT_PROFILES = stringPreferencesKey("recent_profiles_json")
+
+        /** Spinner / quick-pick capacity. */
+        const val MAX_RECENT = 10
 
         private val json: Json = Json {
             ignoreUnknownKeys = true
@@ -129,6 +279,9 @@ class SettingsStore(context: Context) {
 
         private val selectionsSerializer =
             MapSerializer(String.serializer(), AutoEqSelection.serializer())
+        private val gainsSerializer = ListSerializer(Float.serializer())
+        private val presetsSerializer = ListSerializer(GraphicEqPreset.serializer())
+        private val recentsSerializer = ListSerializer(AutoEqCatalogEntry.serializer())
     }
 }
 

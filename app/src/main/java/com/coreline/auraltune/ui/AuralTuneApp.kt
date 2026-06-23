@@ -7,6 +7,7 @@
 package com.coreline.auraltune.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,8 @@ import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -50,13 +53,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.coreline.autoeq.model.CatalogState
 import com.coreline.auraltune.AuralTuneApplication
+import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
-import com.coreline.auraltune.audio.AudioPlayerService
-import com.coreline.auraltune.audio.DeviceAutoEqManager
-import com.coreline.auraltune.audio.TestTone
 import com.coreline.auraltune.audio.MusicPlayerController
-import com.coreline.auraltune.audio.audiofx.AudioFxSessionProbe
-import androidx.compose.runtime.DisposableEffect
 
 /**
  * Top-level AuralTune Composable. Hosts the [AuralTuneTheme] + [Scaffold] and binds the
@@ -68,34 +67,12 @@ fun AuralTuneApp() {
     AuralTuneTheme {
         val context = LocalContext.current
         val app = context.applicationContext as AuralTuneApplication
-        val locator = app.serviceLocator
 
-        // Per-activity AudioEngine + AudioPlayerService. The engine is closed alongside
-        // the AudioPlayerService when the composable leaves composition.
-        val engine = remember { locator.createAudioEngine() }
-        val player = remember { AudioPlayerService(engine, sampleRate = engine.sampleRate) }
-        val tone = remember { TestTone(engine.sampleRate) }
-        val managerScope = androidx.compose.runtime.rememberCoroutineScope()
-        val deviceManager = remember {
-            DeviceAutoEqManager(
-                context = context,
-                engine = engine,
-                api = locator.autoEqApi,
-                settings = locator.settingsStore,
-                coroutineScope = managerScope,
-            )
-        }
-        val musicController = remember { MusicPlayerController(context, engine) }
-        DisposableEffectClose(player, engine, deviceManager, musicController)
-
-        val vm: AutoEqViewModel = viewModel(
-            factory = AutoEqViewModelFactory(
-                locator.autoEqApi,
-                locator.settingsStore,
-                engine,
-                deviceManager,
-            ),
-        )
+        // Phase 2: the ViewModel owns the audio stack (engine / musicController /
+        // deviceManager) and closes it in onCleared(), so it survives rotation. The
+        // Composable no longer creates or disposes any of it.
+        val vm: AutoEqViewModel = viewModel(factory = AutoEqViewModelFactory(app))
+        val musicController = vm.musicController
 
         val snackbarHostState = remember { SnackbarHostState() }
 
@@ -117,8 +94,6 @@ fun AuralTuneApp() {
         ) { padding ->
             AuralTuneScreen(
                 vm = vm,
-                player = player,
-                tone = tone,
                 musicController = musicController,
                 contentPadding = padding,
             )
@@ -129,8 +104,6 @@ fun AuralTuneApp() {
 @Composable
 private fun AuralTuneScreen(
     vm: AutoEqViewModel,
-    player: AudioPlayerService,
-    tone: TestTone,
     musicController: MusicPlayerController,
     contentPadding: PaddingValues,
 ) {
@@ -142,36 +115,23 @@ private fun AuralTuneScreen(
     val preampEnabled by vm.preampEnabled.collectAsState()
     val favorites by vm.favoriteIds.collectAsState()
     val diag by vm.diagnostics.collectAsState()
+    val bandGains by vm.bandGains.collectAsState()
+    val eqPresets by vm.graphicEqPresets.collectAsState()
+    val selectedPresetId by vm.selectedGraphicEqPresetId.collectAsState()
+    val gainLimit by vm.gainLimitDb.collectAsState()
+    val showPreamp by vm.showPreampOnGraph.collectAsState()
+    val recents by vm.recentProfiles.collectAsState()
 
-    // Phase 2 PoC: 외부앱이 effect-control-session broadcast를 보내는지 측정.
-    val probeContext = LocalContext.current
-    val sessionProbe = remember { AudioFxSessionProbe(probeContext) }
-    DisposableEffect(Unit) {
-        sessionProbe.start()
-        onDispose { sessionProbe.close() }
-    }
-    val fxDetections by sessionProbe.detections.collectAsState()
-
-    var testToneOn by remember { mutableStateOf(false) }
-    LaunchedEffect(testToneOn) {
-        if (testToneOn) {
-            // 배타: 테스트 톤과 음악은 같은 엔진을 audio thread에서 process하므로 동시 금지.
-            musicController.stop()
-            tone.reset()
-            player.start { out, n -> tone.fill(out, n) }
-        } else {
-            player.stop()
-        }
-    }
+    // Phase 2 PoC(외부앱 effect-control-session 측정)는 DebugSupport.AudioFxProbeCard 안으로
+    // 완전히 이동했다(src/debug=실제, src/release=no-op). main은 probe를 전혀 참조하지 않는다.
 
     // 음악 파일 선택 launcher — 본문에서 remember (LazyColumn item 안에 두면
     // 스크롤로 item이 detach될 때 ActivityResult 콜백이 유실될 수 있음).
     val audioPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        android.util.Log.i("MusicPlay", "picked uri=$uri")
+        if (BuildConfig.DEBUG) android.util.Log.i("MusicPlay", "picked uri=$uri")
         if (uri != null) {
-            testToneOn = false // 배타: 음악 재생 시 테스트 톤 정지
             musicController.play(uri)
         }
     }
@@ -183,28 +143,6 @@ private fun AuralTuneScreen(
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Test tone toggle
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = stringResource(R.string.test_tone_label),
-                    modifier = Modifier.weight(1f),
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                Text(
-                    text = if (testToneOn) stringResource(R.string.test_tone_on)
-                    else stringResource(R.string.test_tone_off),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(0.dp))
-                Switch(checked = testToneOn, onCheckedChange = { testToneOn = it })
-            }
-        }
-
         // 로컬 음악 재생 (T1) — launcher는 본문에서 remember됨.
         item {
             Row(
@@ -213,36 +151,58 @@ private fun AuralTuneScreen(
             ) {
                 // TODO(i18n): 문자열 리소스화
                 val playCtx = LocalContext.current
+                // 항상 SAF 파일 선택기를 띄워 사용자가 곡을 고르고 바꿀 수 있게 한다(debug/release 동일).
+                // SAF 핸들러(DocumentsUI)가 없거나 차단된 일부 기기(전용 DAP 등)에서는 launch()가
+                // ActivityNotFoundException을 던질 수 있어 무반응처럼 보인다 → 가드 + Toast 피드백.
                 Button(
                     onClick = {
-                        // DEBUG(T1 자동 테스트): SAF 대신 MediaStore 첫 곡 직접 재생.
-                        // 정식 경로 복원 시 audioPicker.launch(arrayOf("audio/*"))로 교체.
-                        val uri = firstAudioUri(playCtx)
-                        android.util.Log.i("MusicPlay", "debug firstAudioUri=$uri")
-                        if (uri != null) {
-                            testToneOn = false
-                            musicController.play(uri)
+                        try {
+                            audioPicker.launch(arrayOf("audio/*"))
+                        } catch (e: android.content.ActivityNotFoundException) {
+                            if (BuildConfig.DEBUG) android.util.Log.w("MusicPlay", "no SAF picker", e)
+                            android.widget.Toast.makeText(
+                                playCtx,
+                                "이 기기에서 파일 선택기를 열 수 없습니다 (SAF 미지원)",
+                                android.widget.Toast.LENGTH_LONG,
+                            ).show()
                         }
                     },
                     modifier = Modifier.weight(1f),
-                ) { Text("음악 파일 재생") }
+                ) { Text("음악 파일 선택") }
                 OutlinedButton(
                     onClick = { musicController.stop() },
                     modifier = Modifier.weight(1f),
                 ) { Text("정지") }
+                // 디버그 전용 빠른 재생(자동 테스트용): MediaStore 첫 곡 즉시 재생. release엔 없음.
+                if (BuildConfig.DEBUG) {
+                    OutlinedButton(onClick = {
+                        DebugSupport.firstPlayableUri(playCtx)?.let { musicController.play(it) }
+                    }) { Text("첫곡") }
+                }
             }
         }
 
-        // Status card
+        // Kill switch — top zone (moved up from below the results).
         item {
-            StatusCard(
-                profile = selected,
-                isEnabled = correctionEnabled,
-                preampEnabled = preampEnabled,
-                onClear = vm::clearProfile,
-                onToggleCorrection = vm::toggleCorrection,
-                onTogglePreamp = vm::togglePreamp,
-            )
+            val killed by vm.killSwitchEngaged.collectAsState()
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                stringResource(R.string.kill_switch_label),
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                stringResource(R.string.kill_switch_hint),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(checked = killed, onCheckedChange = vm::setKillSwitchEngaged)
+                    }
+                }
+            }
         }
 
         // Search field
@@ -255,6 +215,37 @@ private fun AuralTuneScreen(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+
+        // 최근/빠른 선택 프로파일 스피너 — 이전 선택 10개(최초 1회 큐레이션 pre-seed).
+        if (recents.isNotEmpty()) {
+            item {
+                var expanded by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = selected?.name?.let { "프로파일: $it" } ?: "프로파일 빠른 선택 ▾",
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                    ) {
+                        recents.forEach { entry ->
+                            DropdownMenuItem(
+                                text = { Text(entry.name) },
+                                onClick = {
+                                    expanded = false
+                                    vm.selectProfile(entry)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // P3-A: SAF picker + clear cache.
@@ -306,7 +297,9 @@ private fun AuralTuneScreen(
             }
             is CatalogState.Loaded -> {
                 if (results.entries.isEmpty()) {
-                    item { EmptyStateMessage(stringResource(R.string.no_results)) }
+                    // 검색어가 없으면 "결과 없음"이 아니라 검색 안내를 띄운다(카탈로그는 정상 로드됨).
+                    val emptyMsg = if (query.isBlank()) R.string.search_prompt else R.string.no_results
+                    item { EmptyStateMessage(stringResource(emptyMsg)) }
                 } else {
                     items(results.entries, key = { it.id }) { entry ->
                         CatalogEntryRow(
@@ -321,27 +314,45 @@ private fun AuralTuneScreen(
             }
         }
 
-        // P2-E kill switch UI.
+        // 상태 카드(프로파일명 + 닫기) — AutoEQ 토글 바로 위로 이동(그래픽 EQ 위에 프로파일+토글을 묶음).
         item {
-            val killed by vm.killSwitchEngaged.collectAsState()
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.kill_switch_label),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.kill_switch_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = killed, onCheckedChange = vm::setKillSwitchEngaged)
-                    }
-                }
-            }
+            StatusCard(
+                profile = selected,
+                onClear = vm::clearProfile,
+            )
+        }
+
+        // AutoEQ correction + preamp 토글 — 그래픽 EQ 바로 위로 이동.
+        item {
+            AutoEqToggleCard(
+                isEnabled = correctionEnabled,
+                preampEnabled = preampEnabled,
+                onToggleCorrection = vm::toggleCorrection,
+                onTogglePreamp = vm::togglePreamp,
+            )
+        }
+
+        // 그래픽 EQ (20밴드, Manual chain) — AutoEQ 프로파일과 독립·합성.
+        item {
+            GraphicEqCard(
+                bandGains = bandGains,
+                // 그래프엔 correction이 켜졌을 때만 AutoEQ 곡선/preamp를 합성한다(실제 신호와 일치).
+                autoEqFilters = if (correctionEnabled) selected?.filters.orEmpty() else emptyList(),
+                presets = eqPresets,
+                selectedPresetId = selectedPresetId,
+                gainLimitDb = gainLimit,
+                preampDb = if (correctionEnabled) selected?.preampDB ?: 0f else 0f,
+                showPreamp = showPreamp,
+                // 실제 출력 반영: correction+preamp 둘 다 켜졌을 때만 곡선을 preampDb만큼 하강.
+                preampApplied = correctionEnabled && preampEnabled,
+                onBandChange = vm::setBandGain,
+                onGainLimitChange = vm::setGainLimit,
+                onToggleShowPreamp = vm::setShowPreampOnGraph,
+                onReset = vm::resetGraphicEq,
+                onSavePreset = vm::saveGraphicEqPreset,
+                onLoadPreset = vm::loadGraphicEqPreset,
+                onDeletePreset = vm::deleteGraphicEqPreset,
+            )
         }
 
         // Diagnostics card (collapsed by default).
@@ -354,42 +365,10 @@ private fun AuralTuneScreen(
             )
         }
 
-        // Phase 2 PoC — 외부앱 AudioFx 신호 측정 카드 (임시 측정 도구).
-        item {
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    // TODO(i18n): 문자열 리소스화 (PoC 임시 UI)
-                    Text(
-                        "외부앱 신호 측정 (PoC)",
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                    Text(
-                        "이 앱을 켠 채 Spotify·유튜브 등 다른 음악 앱을 재생해 보세요. " +
-                            "신호를 보내는 앱만 외부 EQ 적용이 가능합니다.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "감지 ${fxDetections.size}건",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    if (fxDetections.isEmpty()) {
-                        Text(
-                            "아직 감지 없음",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    } else {
-                        fxDetections.takeLast(10).reversed().forEach { d ->
-                            Text(
-                                "${d.action} · ${d.packageName} · session=${d.audioSession}",
-                                style = MaterialTheme.typography.bodySmall,
-                            )
-                        }
-                    }
-                }
-            }
+        // Phase 2 PoC — 외부앱 AudioFx 신호 측정 카드. debug=실제 측정 UI / release=no-op(빈 컴포저블).
+        // BuildConfig.DEBUG로 item 자체를 감싸 release에선 빈 슬롯/간격도 생기지 않게 한다.
+        if (BuildConfig.DEBUG) {
+            item { DebugSupport.AudioFxProbeCard() }
         }
 
         // Attribution footer
@@ -409,23 +388,6 @@ private fun AuralTuneScreen(
  * Falls back to the URI's last path segment when DISPLAY_NAME isn't reported
  * (e.g. some pickers return null cursor for the column).
  */
-/** DEBUG(T1 자동 테스트): MediaStore에서 첫 음악 파일 content URI. 정식 경로(SAF) 복원 시 제거. */
-private fun firstAudioUri(context: android.content.Context): android.net.Uri? {
-    val collection = android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-    val proj = arrayOf(android.provider.MediaStore.Audio.Media._ID)
-    return runCatching {
-        context.contentResolver.query(
-            collection, proj,
-            "${android.provider.MediaStore.Audio.Media.IS_MUSIC}!=0", null,
-            "${android.provider.MediaStore.Audio.Media.TITLE} ASC",
-        )?.use { c ->
-            if (c.moveToFirst()) {
-                android.content.ContentUris.withAppendedId(collection, c.getLong(0))
-            } else null
-        }
-    }.getOrNull()
-}
-
 private fun queryDisplayName(context: android.content.Context, uri: android.net.Uri): String {
     return runCatching {
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -433,36 +395,4 @@ private fun queryDisplayName(context: android.content.Context, uri: android.net.
             if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
         }
     }.getOrNull() ?: uri.lastPathSegment ?: "Imported profile"
-}
-
-/**
- * Closes the audio player and engine when the host Composable leaves composition. Kept as a
- * dedicated helper so the call-site is one line and the cleanup order (stop player → close
- * engine) is enforced.
- */
-@Composable
-private fun DisposableEffectClose(
-    player: AudioPlayerService,
-    engine: com.coreline.audio.AudioEngine,
-    deviceManager: DeviceAutoEqManager,
-    musicController: MusicPlayerController,
-) {
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        // Start the device-route manager immediately so the engine sees the correct
-        // sample rate AND restores any saved per-device profile before the user
-        // hits "Test tone" / playback. Stop ordering on dispose:
-        //   1. deviceManager.close()  — no more native updateSampleRate / updateAutoEq.
-        //   2. musicController.close() — releases ExoPlayer (its audio thread).
-        //   3. player.close()         — joins the TestTone audio thread.
-        //   4. engine.close()         — frees the native handle. Lifecycle-safe per P0-3.
-        // D1: wrap each pre-close step in runCatching so a throw never prevents
-        // engine.close() from freeing the native handle.
-        deviceManager.start()
-        onDispose {
-            runCatching { deviceManager.close() }
-            runCatching { musicController.close() }
-            runCatching { player.close() }
-            engine.close()
-        }
-    }
 }

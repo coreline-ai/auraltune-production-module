@@ -20,6 +20,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.coreline.audio.AudioEngine
+import com.coreline.auraltune.BuildConfig
 import java.io.Closeable
 
 @UnstableApi
@@ -49,20 +50,20 @@ class MusicPlayerController(
             .apply {
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
-                        Log.e(TAG, "player error: ${error.errorCodeName}", error)
+                        if (BuildConfig.DEBUG) Log.e(TAG, "player error: ${error.errorCodeName}", error)
                     }
                     override fun onPlaybackStateChanged(playbackState: Int) {
-                        Log.i(TAG, "state=$playbackState (1=IDLE 2=BUFFERING 3=READY 4=ENDED)")
+                        if (BuildConfig.DEBUG) Log.i(TAG, "state=$playbackState (1=IDLE 2=BUFFERING 3=READY 4=ENDED)")
                     }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        Log.i(TAG, "isPlaying=$isPlaying")
+                        if (BuildConfig.DEBUG) Log.i(TAG, "isPlaying=$isPlaying")
                     }
                 })
             }
     }
 
     fun play(uri: Uri) {
-        Log.i(TAG, "play() uri=$uri")
+        if (BuildConfig.DEBUG) Log.i(TAG, "play() uri=$uri")
         player.setMediaItem(MediaItem.fromUri(uri))
         player.prepare()
         player.playWhenReady = true

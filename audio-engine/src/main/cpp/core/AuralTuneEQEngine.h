@@ -83,6 +83,10 @@ public:
     static constexpr float kLimiterThreshold = 0.95f;
     static constexpr float kLimiterHeadroom  = 0.05f;
 
+    // AutoEQ enable/disable smoothing: the correction is faded in/out with a
+    // linear wet/dry crossfade over this many seconds (not an abrupt snap).
+    static constexpr float kAutoEqRampSeconds = 0.5f;
+
     // Retire grace — minimum lifetime of a published snapshot after a newer
     // one has taken over. 500 ms is comfortably larger than any audio
     // callback (typical 5-20 ms, worst-case ~100 ms) and matches the Swift
@@ -118,7 +122,10 @@ public:
                        const float* qs,
                        int count);
 
-    void setAutoEqEnabled(bool e);
+    // Enable/disable the AutoEQ correction. By default the transition is
+    // crossfaded over kAutoEqRampSeconds. Pass immediate=true (kill switch /
+    // safety bypass) to snap with no fade.
+    void setAutoEqEnabled(bool e, bool immediate = false);
     void setManualEqEnabled(bool e);
     void setAutoEqPreampEnabled(bool e);
 
@@ -176,6 +183,15 @@ public:
     // pcm   : stereo interleaved float32, length = numFrames * 2.
     // returns 0 on success, -1 on bad arguments (no allocations either way).
     int process(float* pcm, int numFrames) noexcept;
+
+    // Format-agnostic variant: decode [in] (PcmFormat [inFormat]) to float32, run [process],
+    // encode to [out] (PcmFormat [outFormat]). Stereo interleaved. in/out may be the same
+    // buffer ONLY when both formats are F32. The DSP is unchanged (float32); this just adapts
+    // bit depth at the boundary so the .so supports 16/24/32-int + float I/O at any sample rate.
+    // returns 0 on success, negative on bad arguments. NOTE: grows an internal float scratch on
+    // first/large call (not strictly RT-safe on growth — size it via a warmup call if needed).
+    int processFormatted(const uint8_t* in, int inFormat,
+                         uint8_t* out, int outFormat, int numFrames) noexcept;
 
     // Read AudioTrack's getUnderrunCount() delta since last call. Caller is
     // the Kotlin AudioPlayerService; this just propagates into our diagnostic
@@ -246,6 +262,13 @@ private:
         // before processing the first callback that observes this snapshot.
         bool requestDelayReset = false;
 
+        // True when the AutoEQ enable/disable transition must be applied
+        // INSTANTLY (no 0.5 s crossfade) — used by the kill switch / safety
+        // bypass. Audio thread snaps autoEqMix_ to the target on this generation.
+        // Only ever set together with autoOn=false (kill), so a stale copy
+        // forwarded by allocateSnapshotFromCurrent harmlessly re-snaps to bypass.
+        bool snapAutoEqMix = false;
+
         // Enable / control flags.
         bool manualOn       = false;
         bool autoOn         = false;
@@ -259,6 +282,13 @@ private:
 
         // Linear preamp gain (already converted from dB).
         float autoEqPreampLinear = 1.0f;
+
+        // Per-sample (per-frame) increment for the AutoEQ enable/disable mix
+        // ramp = 1 / (kAutoEqRampSeconds * sampleRate). Depends only on the rate,
+        // so it is set in the constructor + recomputed on sample-rate change and
+        // carried forward by allocateSnapshotFromCurrent(). Fallback default is
+        // the 48 kHz value; the real value always overrides it before any audio.
+        float autoEqMixStep = 1.0f / (kAutoEqRampSeconds * 48000.0f);
 
         // Stage D: BS.1770 auto-leveler enable flag. The actual processor
         // instance lives in `activeLoudnessEq_` (separate atomic) because it
@@ -306,6 +336,13 @@ private:
                                    double frequency,
                                    float gainDB,
                                    double q) const;
+
+    // Per-sample mix-ramp increment for the AutoEQ enable/disable crossfade.
+    static float computeAutoEqMixStep(double rate);
+
+    // Apply the AutoEQ stage (preamp gain + biquad cascade) in place. Audio
+    // thread only — reads the snapshot, mutates [autoEqChain_] delay state.
+    void applyAutoEqCascade(const EngineSnapshot* s, float* pcm, int numFrames) noexcept;
 
     // ---- Control-thread state (NOT read by audio thread) ----
 
@@ -367,6 +404,8 @@ private:
     uint64_t generationCounter_ = 0;        // control thread only
 
     // ---- Audio-thread-owned biquad state ----
+    // Reusable float32 scratch for processFormatted() (decode target / encode source).
+    std::vector<float> formatScratch_;  // audio thread only
     std::array<BiquadFilter, kMaxManualFilters> manualChain_{};
     std::array<BiquadFilter, kMaxAutoEqFilters> autoEqChain_{};
     // Stage C: ISO 226 compensation chain — 4 fixed biquads.
@@ -383,6 +422,20 @@ private:
     void sweepLoudnessEqRetireQueue();   // control thread only
 
     uint64_t lastSeenGeneration_ = 0; // audio thread only
+
+    // AutoEQ enable/disable crossfade state — audio thread only.
+    // [autoEqMix_] is the current wet/dry mix (0=bypass, 1=full correction),
+    // ramped toward the snapshot's autoOn target by autoEqMixStep each frame.
+    // [autoEqDryScratch_] holds the dry (pre-AutoEQ) copy during a transition;
+    // pre-sized to kMaxProcessFrames*2 at construction so the audio thread never
+    // allocates.
+    double autoEqMix_ = 0.0;
+    // False until the first process() callback snaps [autoEqMix_] to the
+    // initial target. This makes the very first state instant (no fade on app
+    // launch / before any audio, and deterministic for golden tests); only
+    // genuine enable/disable transitions DURING playback are crossfaded.
+    bool autoEqMixInit_ = false;
+    std::vector<float> autoEqDryScratch_;  // audio thread only
 
     // ---- Diagnostics counters (relaxed atomic) ----
     std::atomic<int64_t> diagXrun_{0};

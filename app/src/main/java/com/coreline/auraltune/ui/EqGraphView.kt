@@ -1,0 +1,169 @@
+// EqGraphView.kt
+// Phase G2 — frequency-response graph (Canvas).
+// Draws the COMPOSITE curve = Manual 20-band (graphic EQ) + AutoEQ profile filters,
+// computed entirely in Kotlin via BiquadResponse (no native call). The AutoEQ dashed
+// curve is overlaid so the user can see the headphone correction separately.
+package com.coreline.auraltune.ui
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.unit.dp
+import com.coreline.audio.EqFilterType
+import com.coreline.auraltune.audio.eq.BiquadResponse
+import com.coreline.auraltune.audio.eq.BiquadSpec
+import com.coreline.auraltune.audio.eq.BiquadType
+import com.coreline.auraltune.audio.eq.GraphicEqBands
+import com.coreline.autoeq.model.AutoEqFilter
+import kotlin.math.log10
+import kotlin.math.pow
+
+private const val MIN_HZ = 20.0
+private const val MAX_HZ = 20_000.0
+private const val MAX_DB = 15.0          // y-axis half-range (±15 dB)
+private const val SAMPLE_RATE = 48_000.0
+private const val CURVE_POINTS = 180
+
+/** Map an AutoEQ profile filter to the graph's BiquadSpec (enum names align 1:1). */
+private fun AutoEqFilter.toSpec(): BiquadSpec = BiquadSpec(
+    type = when (type) {
+        EqFilterType.PEAKING -> BiquadType.PEAKING
+        EqFilterType.LOW_SHELF -> BiquadType.LOW_SHELF
+        EqFilterType.HIGH_SHELF -> BiquadType.HIGH_SHELF
+        EqFilterType.HIGH_PASS -> BiquadType.HIGH_PASS
+    },
+    freqHz = frequency,
+    gainDb = gainDB.toDouble(),
+    q = q,
+)
+
+@Composable
+fun EqGraphView(
+    bandGains: FloatArray,
+    autoEqFilters: List<AutoEqFilter>,
+    modifier: Modifier = Modifier,
+    /** Active profile preamp (dB, usually negative). Drawn as a horizontal reference line. */
+    preampDb: Float = 0f,
+    /** Whether to overlay the preamp reference line (marker). */
+    showPreamp: Boolean = false,
+    /**
+     * Whether the preamp gain is actually in the signal path (correction + preamp
+     * both on). When true the response curves are shifted DOWN by [preampDb] so the
+     * graph reflects the real output level (curves settle onto the preamp marker line).
+     */
+    preampApplied: Boolean = false,
+) {
+    // Log-spaced sample frequencies (stable across recompositions).
+    val freqs = remember {
+        DoubleArray(CURVE_POINTS) { i ->
+            MIN_HZ * (MAX_HZ / MIN_HZ).pow(i.toDouble() / (CURVE_POINTS - 1))
+        }
+    }
+
+    val manualSpecs = remember(bandGains) { GraphicEqBands.toSpecs(bandGains) }
+    val autoSpecs = remember(autoEqFilters) { autoEqFilters.map { it.toSpec() } }
+
+    val composite = remember(manualSpecs, autoSpecs) {
+        BiquadResponse.compositeDb(freqs, manualSpecs + autoSpecs, SAMPLE_RATE)
+    }
+    val autoCurve = remember(autoSpecs) {
+        if (autoSpecs.isEmpty()) null else BiquadResponse.compositeDb(freqs, autoSpecs, SAMPLE_RATE)
+    }
+
+    val gridColor = Color(0x22000000)
+    val zeroColor = Color(0x55000000)
+    val autoColor = Color(0xFF9E9E9E)
+    val compositeColor = Color(0xFF2962FF)
+    val preampColor = Color(0xFFFF6D00) // orange — distinct from blue composite / gray AutoEQ
+
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(160.dp)
+            .padding(horizontal = 4.dp),
+    ) {
+        val w = size.width
+        val h = size.height
+
+        fun xOf(freqHz: Double): Float {
+            val t = (log10(freqHz) - log10(MIN_HZ)) / (log10(MAX_HZ) - log10(MIN_HZ))
+            return (t * w).toFloat()
+        }
+        fun yOf(db: Double): Float {
+            val clamped = db.coerceIn(-MAX_DB, MAX_DB)
+            return (h * (0.5 - clamped / (2 * MAX_DB))).toFloat()
+        }
+
+        // Vertical grid at decade marks (100, 1k, 10k) + octave-ish helpers.
+        for (f in listOf(50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0)) {
+            val x = xOf(f)
+            drawLine(gridColor, Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
+        }
+        // Horizontal dB grid lines every 5 dB.
+        for (db in listOf(-15.0, -10.0, -5.0, 5.0, 10.0, 15.0)) {
+            val y = yOf(db)
+            drawLine(gridColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+        }
+        // 0 dB baseline.
+        drawLine(zeroColor, Offset(0f, yOf(0.0)), Offset(w, yOf(0.0)), strokeWidth = 2f)
+
+        // Preamp reference line (orange dashed, horizontal) at the profile's preamp level.
+        if (showPreamp && kotlin.math.abs(preampDb) > 0.05f) {
+            val y = yOf(preampDb.toDouble())
+            drawLine(
+                preampColor,
+                Offset(0f, y),
+                Offset(w, y),
+                strokeWidth = 2f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 6f)),
+            )
+        }
+
+        // When the preamp is actually applied, the entire output is attenuated by
+        // preampDb (frequency-independent) → shift the curves DOWN in parallel so
+        // the graph matches what is heard (flat regions settle onto the preamp line).
+        val curveShift = if (preampApplied) preampDb.toDouble() else 0.0
+        fun yOfShifted(db: Double): Float = yOf(db + curveShift)
+
+        // AutoEQ-only curve (dashed) when a profile is active.
+        autoCurve?.let { curve ->
+            drawCurve(freqs, curve, autoColor, ::xOf, ::yOfShifted, dashed = true)
+        }
+        // Composite curve (solid) — what the user effectively hears.
+        drawCurve(freqs, composite, compositeColor, ::xOf, ::yOfShifted, dashed = false)
+    }
+}
+
+private fun DrawScope.drawCurve(
+    freqs: DoubleArray,
+    curveDb: DoubleArray,
+    color: Color,
+    xOf: (Double) -> Float,
+    yOf: (Double) -> Float,
+    dashed: Boolean,
+) {
+    val path = Path()
+    for (i in freqs.indices) {
+        val x = xOf(freqs[i])
+        val y = yOf(curveDb[i])
+        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    }
+    drawPath(
+        path = path,
+        color = color,
+        style = Stroke(
+            width = if (dashed) 2f else 3f,
+            pathEffect = if (dashed) PathEffect.dashPathEffect(floatArrayOf(8f, 8f)) else null,
+        ),
+    )
+}

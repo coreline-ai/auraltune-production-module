@@ -9,6 +9,7 @@
 
 #include "AuralTuneEQEngine.h"
 
+#include "PcmConvert.h"
 #include "loudness/IsoContours.h"
 #include "loudness/LoudnessCompensator.h"
 #include "loudness/LoudnessEqualizer.h"
@@ -49,7 +50,31 @@ AuralTuneEQEngine::AuralTuneEQEngine(double sampleRate)
     for (auto& c : boot->autoEqCoeffs) c = BiquadCoeffs::unity();
     for (auto& c : boot->loudnessCompCoeffs) c = BiquadCoeffs::unity();
     boot->generation = 0;
+    boot->autoEqMixStep = computeAutoEqMixStep(currentRate_);
     activeSnapshot_.store(boot, std::memory_order_release);
+
+    // Pre-size the AutoEQ crossfade dry-copy buffer so the audio thread never
+    // allocates during a transition (kMaxProcessFrames stereo frames).
+    autoEqDryScratch_.resize(static_cast<size_t>(kMaxProcessFrames) * 2u);
+}
+
+float AuralTuneEQEngine::computeAutoEqMixStep(double rate) {
+    const double r = (rate > 0.0) ? rate : 48000.0;
+    return static_cast<float>(1.0 / (static_cast<double>(kAutoEqRampSeconds) * r));
+}
+
+void AuralTuneEQEngine::applyAutoEqCascade(const EngineSnapshot* s,
+                                           float* pcm, int numFrames) noexcept {
+    if (s->preampOn && s->autoEqPreampLinear != 1.0f) {
+        const float g = s->autoEqPreampLinear;
+        const int total = numFrames * 2;
+        for (int i = 0; i < total; ++i) pcm[i] *= g;
+    }
+    const int n = (s->autoEqCount < kMaxAutoEqFilters)
+                      ? s->autoEqCount : kMaxAutoEqFilters;
+    for (int i = 0; i < n; ++i) {
+        autoEqChain_[i].processStereoInterleaved(s->autoEqCoeffs[i], pcm, numFrames);
+    }
 }
 
 AuralTuneEQEngine::~AuralTuneEQEngine() {
@@ -327,6 +352,10 @@ void AuralTuneEQEngine::writeAllCoeffsInto(EngineSnapshot& dst) const {
             dst.loudnessCompCoeffs[i] = coeffs[i];
         }
     }
+
+    // AutoEQ crossfade ramp step depends only on the sample rate — refresh it
+    // here so a rate change keeps the 0.5 s fade duration correct.
+    dst.autoEqMixStep = computeAutoEqMixStep(currentRate_);
 }
 
 // ---------------------------------------------------------------------------
@@ -455,13 +484,16 @@ int AuralTuneEQEngine::updateManualEq(const float* frequencies,
     return 0;
 }
 
-void AuralTuneEQEngine::setAutoEqEnabled(bool e) {
+void AuralTuneEQEngine::setAutoEqEnabled(bool e, bool immediate) {
     std::lock_guard<std::mutex> lock(updateMutex_);
     const EngineSnapshot* prev = activeSnapshot_.load(std::memory_order_acquire);
-    if (prev->autoOn == e) return;
+    // When immediate (kill switch), always publish even if autoOn is unchanged,
+    // so the snap flag reaches the audio thread and cuts any in-flight fade.
+    if (prev->autoOn == e && !immediate) return;
     EngineSnapshot* slot = allocateSnapshotFromCurrent();
     slot->autoOn = e;
     slot->requestDelayReset = false;
+    slot->snapAutoEqMix = immediate;
     publishSnapshot(slot);
 }
 
@@ -671,6 +703,13 @@ int AuralTuneEQEngine::process(float* pcm, int numFrames) noexcept {
             for (auto& f : autoEqChain_) f.reset();
             for (auto& f : loudnessCompChain_) f.reset();
         }
+        // Immediate AutoEQ bypass (kill switch / safety): snap the crossfade mix
+        // straight to the target with NO 0.5 s fade, so a dangerous correction
+        // stops instantly — matching the documented "no DSP passthrough" guarantee.
+        if (s->snapAutoEqMix) {
+            autoEqMix_ = s->autoOn ? 1.0 : 0.0;
+            autoEqMixInit_ = true;
+        }
         lastSeenGeneration_ = s->generation;
     }
 
@@ -683,19 +722,57 @@ int AuralTuneEQEngine::process(float* pcm, int numFrames) noexcept {
         }
     }
 
-    // 2 + 3. AutoEQ preamp + cascade.
-    if (s->autoOn) {
-        if (s->preampOn && s->autoEqPreampLinear != 1.0f) {
-            const float g = s->autoEqPreampLinear;
-            const int total = numFrames * 2;
-            for (int i = 0; i < total; ++i) {
-                pcm[i] *= g;
-            }
+    // 2 + 3. AutoEQ stage (preamp + cascade) with a 0.5 s linear wet/dry
+    // crossfade on enable/disable so the correction eases in/out ("스르륵"),
+    // never an abrupt snap. The mix is audio-thread-owned; its target comes
+    // from the snapshot's autoOn flag and it ramps by autoEqMixStep per frame.
+    {
+        const double target = s->autoOn ? 1.0 : 0.0;
+        const double step   = static_cast<double>(s->autoEqMixStep);
+        const int total     = numFrames * 2;
+
+        // First callback ever: snap to the target (no fade on launch / before
+        // any audio; keeps the initial frame deterministic for golden tests).
+        if (!autoEqMixInit_) {
+            autoEqMix_ = target;
+            autoEqMixInit_ = true;
         }
-        const int n = (s->autoEqCount < kMaxAutoEqFilters)
-                          ? s->autoEqCount : kMaxAutoEqFilters;
-        for (int i = 0; i < n; ++i) {
-            autoEqChain_[i].processStereoInterleaved(s->autoEqCoeffs[i], pcm, numFrames);
+
+        if (autoEqMix_ >= 1.0 && target >= 1.0) {
+            // Steady full-on fast path — process in place, no dry copy/blend.
+            autoEqMix_ = 1.0;
+            applyAutoEqCascade(s, pcm, numFrames);
+        } else if (autoEqMix_ <= 0.0 && target <= 0.0) {
+            // Steady off fast path — pure passthrough. Filter delay state is
+            // reset lazily when a fresh fade-in starts (below).
+            autoEqMix_ = 0.0;
+        } else {
+            // Transition — wet/dry crossfade. Starting a fresh fade-in from
+            // bypass: reset the cascade so the wet path has no stale transient.
+            if (autoEqMix_ <= 0.0 && target > 0.0) {
+                for (auto& f : autoEqChain_) f.reset();
+            }
+            // Dry copy (bounded by kMaxProcessFrames*2; buffer pre-sized at ctor).
+            std::memcpy(autoEqDryScratch_.data(), pcm,
+                        static_cast<size_t>(total) * sizeof(float));
+            // Wet (in place).
+            applyAutoEqCascade(s, pcm, numFrames);
+            // Per-frame linear blend, ramping mix toward target. Linear (not
+            // equal-power) because dry and wet are the same correlated signal.
+            // Blend with the CURRENT mix first, THEN advance — so frame 0 of a
+            // fresh fade-in emits exactly dry (perfect continuity with the
+            // preceding steady-off fast path), with no off-by-one vs the endpoints.
+            double mix = autoEqMix_;
+            for (int i = 0; i < numFrames; ++i) {
+                const float m = static_cast<float>(mix);
+                const int l = 2 * i;
+                const int r = l + 1;
+                pcm[l] = autoEqDryScratch_[l] + m * (pcm[l] - autoEqDryScratch_[l]);
+                pcm[r] = autoEqDryScratch_[r] + m * (pcm[r] - autoEqDryScratch_[r]);
+                if (mix < target)      { mix += step; if (mix > target) mix = target; }
+                else if (mix > target) { mix -= step; if (mix < target) mix = target; }
+            }
+            autoEqMix_ = mix;
         }
     }
 
@@ -753,6 +830,26 @@ int AuralTuneEQEngine::process(float* pcm, int numFrames) noexcept {
     }
 
     diagTotalFrames_.fetch_add(numFrames, std::memory_order_relaxed);
+    return 0;
+}
+
+int AuralTuneEQEngine::processFormatted(const uint8_t* in, int inFormat,
+                                        uint8_t* out, int outFormat, int numFrames) noexcept {
+    if (in == nullptr || out == nullptr) return -1;
+    if (numFrames < 1 || numFrames > kMaxProcessFrames) return -1;
+    if (!auraltune::isValidPcmFormat(inFormat) || !auraltune::isValidPcmFormat(outFormat)) return -1;
+
+    const int samples = numFrames * 2;  // stereo interleaved
+    if (static_cast<int>(formatScratch_.size()) < samples) {
+        formatScratch_.resize(static_cast<size_t>(samples));  // may allocate on growth
+    }
+    float* f = formatScratch_.data();
+
+    // any-format -> float32 -> DSP (unchanged) -> any-format
+    auraltune::decodeToFloat(in, static_cast<auraltune::PcmFormat>(inFormat), f, samples);
+    const int rc = process(f, numFrames);
+    if (rc != 0) return rc;
+    auraltune::encodeFromFloat(f, out, static_cast<auraltune::PcmFormat>(outFormat), samples);
     return 0;
 }
 

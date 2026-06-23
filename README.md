@@ -13,8 +13,8 @@
 [![NDK](https://img.shields.io/badge/NDK-r27.0.12077973-blue?style=flat-square)](#-build-matrix)
 [![16KB pages](https://img.shields.io/badge/16KB%20pages-✓-orange?style=flat-square)](#-correctness-invariants)
 
-[![Tests](https://img.shields.io/badge/Kotlin%20unit-105%20PASS-brightgreen?style=flat-square)](#-testing)
-[![Native tests](https://img.shields.io/badge/native%20suites-6%20PASS-brightgreen?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/Kotlin%20unit-180%20PASS-brightgreen?style=flat-square)](#-testing)
+[![Native tests](https://img.shields.io/badge/native%20suites-7%20PASS-brightgreen?style=flat-square)](#-testing)
 [![DSP parity](https://img.shields.io/badge/scipy.lfilter%20SNR-140--157%20dB-success?style=flat-square)](#-correctness-invariants)
 [![TSan](https://img.shields.io/badge/ThreadSanitizer-clean-success?style=flat-square)](#-correctness-invariants)
 [![R8](https://img.shields.io/badge/R8%20release-PASS-success?style=flat-square)](#-quick-start)
@@ -32,7 +32,7 @@ DSP-accurate biquad cascade · RT-safe atomic publish · Source-level integratio
 - 🎯 **DSP parity verified** — scipy.lfilter SNR 140–157 dB across 44.1k / 48k / 96k; freqz match to 0.0000 dB worst-case.
 - 🛡️ **TSan-clean atomic publish** — heap `EngineSnapshot` + 500 ms deferred retire closes the audio-thread / control-thread race surface end-to-end.
 - ⚡ **Zero-allocation audio callback** — single `acquire` load per buffer, no locks, no Java callbacks across the JNI boundary.
-- 🧪 **105 Kotlin unit + 6 native suites + 12 instrumented** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
+- 🧪 **180 Kotlin unit (71 engine / 96 data / 13 app) + 6 native suites** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
 - 🧱 **3-layer range validation** — Kotlin `require` → JNI guard → engine bounds-check; cross-language status code surfaces drift as `IllegalStateException`.
 - 🔌 **Source-level integration ready** — `AudioEngine.Builder` enforces sample-rate match, `useInAudioSession` DSL enforces lifecycle, deprecated aliases preserved for downstream binary compat.
 - 📦 **16 KB page-size compatible** — `-Wl,-z,max-page-size=16384` linker flag, verified post-link via `llvm-readelf -l` (`Align 0x4000`).
@@ -43,32 +43,40 @@ DSP-accurate biquad cascade · RT-safe atomic publish · Source-level integratio
 ## 📂 Project Layout
 
 ```
-android-app/
+auraltune-production-module/
 ├── audio-engine/             # :audio-engine — Kotlin lib + native C++ DSP
 │   └── src/main/cpp/
-│       ├── BiquadFilter.{h,cpp}        TDF2 biquad — audio-thread-only delay state
-│       ├── AuralTuneEQEngine.{h,cpp}   Heap snapshot + retire queue, Manual + AutoEQ
-│       │                               chains, RBJ pre-warp, NaN guard, generation token
-│       └── AudioEngineJNI.cpp          Handle-based JNI bridge (12 methods)
+│       ├── core/             JNI-free DSP core (HAL/effect-portable)
+│       │   ├── BiquadFilter.{h,cpp}        TDF2 biquad — audio-thread-only delay state
+│       │   ├── AuralTuneEQEngine.{h,cpp}   Heap snapshot + retire queue, Manual + AutoEQ
+│       │   │                               chains, RBJ pre-warp, NaN guard, generation token
+│       │   └── loudness/                   ISO 226 contours, K-weighting, LoudnessCompensator
+│       └── jni/AudioEngineJNI.cpp          Handle-based JNI bridge
 │
-├── autoeq-data/              # :autoeq-data — Pure Kotlin data layer
+├── autoeq-data/              # :autoeq-data — Pure Kotlin data layer (Room DB-first)
 │   ├── parser/               IndexMd + ParametricEQ parsers
-│   ├── repository/           OkHttp + LRU cache + caller-cancel-safe coalescing
+│   ├── repository/           OkHttp + DB-first repo + caller-cancel-safe coalescing
 │   ├── search/               3-tier fuzzy scoring (substring → normalized → token+edit)
-│   └── cache/                Catalog cache + LRU profile cache + import store
+│   ├── db/                   Room: AutoEqDatabase(v2), Catalog/Profile DAO+Store, MIGRATION_1_2
+│   ├── cache/                Legacy file caches (one-shot migration sources only)
+│   └── src/main/assets/autoeq/INDEX.md     Bundled offline seed (851 KB snapshot)
 │
-└── app/                      # :app — Compose UI + AudioTrack pipeline
-    ├── audio/                AudioPlayerService (Float32 stereo loop)
-    ├── data/                 SettingsStore (DataStore)
+└── app/                      # :app — Compose UI + ExoPlayer (Media3) T1 pipeline
+    ├── audio/                MusicPlayerController + AuralTuneAudioProcessor (engine.process),
+    │                         DeviceAutoEqManager (single engine writer), audiofx/ (T2 probe)
+    ├── audio/eq/             BiquadResponse (Kotlin freqz) + GraphicEqBands (20-band)
+    ├── data/                 SettingsStore (DataStore) + GraphicEqPreset
     ├── di/                   ServiceLocator (manual DI)
-    └── ui/                   AutoEqViewModel + Compose Material 3 screens
+    └── ui/                   AutoEqViewModel (owns audio stack) + Compose screens
+                              (Graphic EQ: GraphicEqView, EqGraphView)
+    └── src/debug/            AndroidManifest overlay (READ_MEDIA_AUDIO — debug-only)
 ```
 
 **Module dependencies (compile-time graph):**
 
 ```
         ┌──────────┐
-        │  :app    │  Compose UI · AudioTrack · DI
+        │  :app    │  Compose UI · ExoPlayer(Media3) · DI
         └────┬─────┘
              │ implementation(project(...))
        ┌─────┴─────┐
@@ -103,7 +111,7 @@ android-app/
 ### One-time setup
 
 ```bash
-cd android-app
+cd auraltune-production-module
 cp local.properties.example local.properties
 # Then edit local.properties to set sdk.dir / ndk.dir
 ```
@@ -128,8 +136,8 @@ adb shell am start -n com.coreline.auraltune/.MainActivity
 ### Run all unit tests
 
 ```bash
-./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest
-# Expected: 105 tests, all PASS
+./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :app:testDebugUnitTest
+# Expected: 180 tests, all PASS (71 engine / 96 data / 13 app)
 ```
 
 ### Run native unit tests (host JVM)
@@ -170,11 +178,11 @@ $ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-
 | NDK | **27.0.12077973** | 16 KB page size — verified via `llvm-readelf -l` (Align 0x4000) |
 | ABI | `arm64-v8a`, `x86_64` | `armeabi-v7a` explicitly excluded |
 | Build tool | CMake 3.22.1+ via `externalNativeBuild` | – |
-| MVP playback pipeline | **AudioTrack Float32 loop** | simplest deterministic baseline |
+| T1 playback pipeline | **ExoPlayer (Media3)** + `AuralTuneAudioProcessor` (engine.process) → `DefaultAudioSink` | local-file playback with in-line EQ |
 | UI | **Jetpack Compose Material 3** | – |
 | DI | Manual `ServiceLocator` | no Hilt for MVP |
 | Foreground Service | **out of MVP** | playback runs only while activity is foregrounded |
-| Catalog bootstrap | first-launch download | smaller APK |
+| Catalog bootstrap | **bundled `assets/autoeq/INDEX.md` seed → Room DB-first** | offline from first launch; network only refreshes (ETag) |
 | Profile ID | `sha256(source\|relativePath\|name).take(24)` | not slug |
 
 ---
@@ -209,8 +217,8 @@ val coherent = applied.generation == expectedGen && applied.autoEqFilterCount > 
 val repo = AutoEqRepository(context)
 repo.primeImports()                      // load user-imported profiles from disk
 
-val catalog: Flow<CatalogState> = repo.loadCatalog(scope)   // cache-first, refresh-stale
-val profile = repo.fetchProfile(entry)   // coalesced via inflight CHM, scope-cancel safe
+val catalog: Flow<CatalogState> = repo.loadCatalog(scope)   // DB-first: bundled seed → DB → ETag refresh
+val profile = repo.fetchProfile(entry)   // DB-first: DB hit → network → DB upsert; coalesced, scope-cancel safe
 
 // On long-running shutdown
 repo.close()                              // cancels all inflight HTTP work
@@ -224,9 +232,10 @@ repo.close()                              // cancels all inflight HTTP work
 
 | Suite | Count | Type | Purpose |
 |---|---|---|---|
-| `:audio-engine` Kotlin unit | **29** | Robolectric + ShadowAudioEngine | API contracts, lifecycle DSL, builder, range gates, native-create failure, native-update rejection |
-| `:autoeq-data` Kotlin unit | **76** | Robolectric + OkHttp interceptor | Parsers, caches, repository (coalescing, cancellation, close), search, kotlinx-behavior pinning |
-| `:app` instrumented | **12** | on-device (PD20 baseline) | End-to-end audio path |
+| `:audio-engine` Kotlin unit | **71** | Robolectric + ShadowAudioEngine | API contracts, lifecycle DSL, builder, range gates, native-create failure, native-update rejection |
+| `:autoeq-data` Kotlin unit | **96** | Robolectric + OkHttp interceptor + in-memory Room | Parsers, caches, DB-first repo (catalog seed, tombstone sweep, profile DB hit/miss/kill-switch, coalescing), search |
+| `:app` Kotlin unit | **13** | JUnit | Graphic-EQ freqz (BiquadResponse) + T2-OS approximation fit (AutoEqApprox) |
+| `:app` instrumented | (on-device) | 3 devices (S25 / PD20 / SP4000T) | End-to-end audio path, rotation, offline DB |
 | Native — `AuralTuneEQEngineTest` | 8 | host g++ | Engine: NaN guard, sample-rate change, validation, snapshot publish, xrun, enable toggle, rapid switching click-free |
 | Native — `RangeValidationTest` | 8 | host g++ | Native-side range bounds, `process()` size validation, applied-snapshot consistency |
 | Native — `GoldenResponseTest` | 3 fs | host g++ | `freqz` parity to **0.0000 dB** worst-case at 48k / 44.1k / 96k |
@@ -279,7 +288,7 @@ DF1 regression check is in `testStaleFilterReset` and the golden-response suite.
 <details>
 <summary><b>5. Lifecycle UAF guard</b></summary>
 
-`AudioEngine` wraps the native handle in `AtomicLong` with CAS-then-destroy `close()`. `AudioPlayerService.stop()` calls `audioTrack.pause() + flush()` to unblock pending `WRITE_BLOCKING` writes, joins with timeout, and escalates via `Thread.interrupt()` if the thread is still alive. Engine is only freed AFTER thread join confirms exit. The Kotlin handle short-circuits stale calls into `process()` / `readDiagnostics()` BEFORE they reach JNI; the underlying JNI does NOT independently validate handle freshness, so callers MUST follow the ordering: `deviceManager.close()` → `player.close()` → `engine.close()`. The `useInAudioSession` DSL makes this ordering compile-time-enforced.
+`AudioEngine` wraps the native handle in `AtomicLong` with CAS-then-destroy `close()`. The audio stack (engine, `MusicPlayerController`, `DeviceAutoEqManager`) is owned by the **retained `AutoEqViewModel`**, not the Composable, so it survives configuration changes (rotation). Teardown happens in `AutoEqViewModel.onCleared()` in the order `deviceManager.close()` → `musicController.close()` → `engine.close()` (each pre-close wrapped in `runCatching` so a throw never blocks `engine.close()`). `MusicPlayerController.close()` releases ExoPlayer (joining its internal audio thread) before the engine is freed. The Kotlin handle short-circuits stale calls into `process()` / `readDiagnostics()` BEFORE they reach JNI. (The legacy `useInAudioSession` DSL remains for direct integrators.)
 </details>
 
 <details>
@@ -289,9 +298,9 @@ DF1 regression check is in `testStaleFilterReset` and the golden-response suite.
 </details>
 
 <details>
-<summary><b>7. AudioTrack is the source of truth for sample rate</b></summary>
+<summary><b>7. The playback path is the source of truth for sample rate</b></summary>
 
-Engine sample rate is locked to AudioPlayerService's configured rate; route detection (`DeviceAutoEqManager.reconcile`) does NOT call `engine.updateSampleRate(...)`. A coordinated AudioTrack rebuild path is post-MVP work — until then, AutoEQ pre-warp targets the AudioTrack rate, not the route-reported rate.
+The engine sample rate is driven by the playback path — `MusicPlayerController`'s `AuralTuneAudioProcessor` reconfigures the engine to the decoded stream rate (e.g. 44100/48000). Route detection (`DeviceAutoEqManager.reconcile`) does NOT call `engine.updateSampleRate(...)` from `AudioDeviceInfo.sampleRates` (those are rates the device CAN do, not the rate actually being fed). So AutoEQ pre-warp always targets the real PCM rate, and route changes never drift it.
 </details>
 
 <details>
@@ -336,13 +345,13 @@ CMake links with `-Wl,-z,max-page-size=16384` and `-Wl,-z,common-page-size=16384
 
 On first launch:
 
-1. **Test tone toggle** — turning it on starts a 1 kHz stereo sine through the entire pipeline (`AudioTrack ← AudioEngine ← TestTone`).
-2. **Catalog download** — pulls `INDEX.md` from `raw.githubusercontent.com/jaakkopasanen/AutoEq` and parses it into a 5,000+ entry catalog (cached for 7 days).
+1. **Local music playback** — pick an audio file via SAF (`ACTION_OPEN_DOCUMENT`); it plays through ExoPlayer with the AutoEQ + graphic-EQ engine inline. (A debug build adds a MediaStore "play first track" shortcut.)
+2. **Offline catalog** — the bundled `assets/autoeq/INDEX.md` seed is imported into Room on first run, so the 5,000+ entry catalog is searchable with **zero network**; a background ETag-conditional refresh updates it only when upstream changed.
 3. **Fuzzy search** — "airpod pro" → "Apple AirPods Pro", with diacritic / case / token-order tolerance.
-4. **Profile fetch** — tapping a result downloads its `ParametricEQ.txt`, parses, and pushes to the native engine.
-5. **Status card** — shows the active profile + Correction / Preamp toggles.
-6. **Diagnostics card** (collapsible) — native counters: xrun, NaN reset, config swap, sample-rate change, total processed frames, applied generation, AutoEQ active filter count.
-7. **Empty states** — distinguishes offline / no catalog / no match / loading.
+4. **Profile fetch (DB-first)** — tapping a result returns the DB-stored profile if present, else downloads `ParametricEQ.txt`, parses, stores parsed filters in Room, and pushes to the engine. Re-loads offline thereafter.
+5. **Graphic EQ (20-band)** — top response-curve graph (Kotlin freqz, composite of Manual + AutoEQ) + 20 vertical sliders driving the engine's Manual chain; named presets save/load (DataStore), current gains auto-restore.
+6. **Status card** — active profile + Correction / Preamp toggles.
+7. **Diagnostics card** (collapsible) — native counters: xrun, NaN reset, config swap, sample-rate change, total processed frames, applied generation, AutoEQ active filter count.
 8. **User imports** — pick a `ParametricEQ.txt` via SAF, deduped by `sha256(text|name)`.
 9. **Kill switch** — local DataStore flag bypasses the entire DSP cascade.
 
@@ -357,9 +366,11 @@ On first launch:
 | **2 — DSP accuracy + atomic publish** | ✅ | Heap `EngineSnapshot` + 500 ms deferred retire for realtime-safe pointer lifetime. Pre-warp, Nyquist guard, RBJ, TDF2, sample-rate change. |
 | **3 — Kotlin parser** | ✅ | BOM / CRLF, NaN reject, comment skip, ≤10 filters, error sealed class |
 | **4 — Catalog / cache / search** | ✅ | LRU 200 / 5 MB, coalescing (LAZY + invokeOnCompletion cleanup), 3-tier fuzzy, telemetry interface |
-| **5 — Per-device persistence** | 🟡 | `SettingsStore` + `AudioDeviceCallback` (`RouteWatcher`) → `engine.updateSampleRate(...)`. Profile-per-device key migration still post-MVP. |
-| **6 — AudioTrack pipeline + UX** | ✅ | Float32 stereo, `URGENT_AUDIO` priority, `AudioTrack.getUnderrunCount → engine.recordXrun(...)`, diagnostics UI, empty states, profile restore on launch. Lifecycle UAF closed via `stop() → pause/flush + interruptible join`. |
-| **7 — Verification** | 🟡 | Native + Kotlin unit tests + on-device instrumented suite all PASS (12/12). Golden response (scipy) and Android CI workflow are follow-ups. |
+| **5 — Per-device persistence** | ✅ | `SettingsStore` + `AudioDeviceCallback` per-device profile selection (device-key). Profiles persisted in Room (`ProfileStore`). |
+| **6 — Playback pipeline + UX** | ✅ | **ExoPlayer (Media3)** + `AuralTuneAudioProcessor` (engine.process inline), diagnostics UI, profile restore on launch, 20-band graphic EQ. Lifecycle owned by retained ViewModel (`onCleared` ordered close). |
+| **7 — Verification** | 🟡 | Native + Kotlin unit tests PASS; on-device verified on 3 devices (S25 / PD20 / SP4000T). Android CI workflow + release-gate doc reconciliation in progress (see `dev-plan/remaining_20260622.md`). |
+
+> Note: the table above is the original **engine/MVP** phase plan. The graphic-EQ + DB-first + release-gate workstream is tracked separately in `dev-plan/implement_20260622_110525.md` (Phases 0–7) and `dev-plan/remaining_20260622.md`.
 
 ---
 
@@ -367,13 +378,15 @@ On first launch:
 
 Per the dev plan's exclusion list:
 
-- ExoPlayer / Oboe pipelines (chosen pipeline = AudioTrack for MVP)
+- Oboe / AAudio low-latency pipeline (T1 uses ExoPlayer/Media3)
 - Foreground service / MediaSession / background playback
 - Remote feature flag / kill switch (local DataStore flag only)
 - Expert grouped multi-source / rig UI
 - Latency compensation (measurement hook only)
 - Limiter attack / release / lookahead upgrade
-- Loudness compensation (separate scope)
+- T3 HAL/effect `.so` global apply (deferred — core kept JNI-free for future porting)
+
+> Note: ExoPlayer (T1 playback) and loudness compensation (`core/loudness/`) are now **implemented**, not out of scope. T2-OS (MusicFX external-app approximation) is at the probe stage (`AudioFxSessionProbe`).
 
 ---
 

@@ -131,9 +131,14 @@ class AudioEngine(sampleRate: Int) : Closeable {
         return nativeUpdateManualEq(handle, frequencies, gainsDB, qFactors)
     }
 
-    fun setAutoEqEnabled(enabled: Boolean) {
+    /**
+     * Enable/disable the AutoEQ correction. By default the transition is
+     * crossfaded (~0.5 s) so the correction eases in/out. Pass [immediate]=true
+     * (kill switch / safety bypass) to snap with no fade.
+     */
+    fun setAutoEqEnabled(enabled: Boolean, immediate: Boolean = false) {
         require(handle != 0L)
-        nativeSetAutoEqEnabled(handle, enabled)
+        nativeSetAutoEqEnabled(handle, enabled, immediate)
     }
 
     fun setManualEqEnabled(enabled: Boolean) {
@@ -280,17 +285,42 @@ class AudioEngine(sampleRate: Int) : Closeable {
     fun process(buffer: ByteBuffer, numFrames: Int): Int {
         // Snapshot once — even if close() happens between this load and the JNI call,
         // native side is required to handle a stale handle being passed in. We rely on
-        // the lifecycle invariant in AudioPlayerService.stop() to never let close() run
-        // before the audio thread is joined; this is a defense-in-depth no-op fast path.
+        // the host's audio-session lifecycle (stop → audio-thread join → close) to never let
+        // close() run before the audio thread is joined; this is a defense-in-depth fast path.
         val h = handleRef.get()
         if (h == 0L) return -1
         return nativeProcessDirectBuffer(h, buffer, numFrames)
     }
 
     /**
-     * Increment the native xrun (underrun) counter by [deltaUnderrunFrames]. Called by
-     * [com.coreline.auraltune.audio.AudioPlayerService] after reading
-     * `AudioTrack.getUnderrunCount()`. RT-safe (atomic counter increment only).
+     * Format-agnostic process: the engine accepts ANY supported PCM bit depth on [input] and
+     * emits ANY on [output], converting to/from its float32 DSP core internally. Stereo
+     * interleaved; both must be direct [ByteBuffer]s. The sample rate is whatever the engine is
+     * configured for (8 kHz–384 kHz via [updateSampleRate]) — set it to the stream rate.
+     *
+     * Capacity contract: `input.capacity >= numFrames*2*inputFormat.bytesPerSample`, likewise
+     * for output. [input]/[output] may be the same buffer only when both formats are [PcmFormat.F32].
+     *
+     * @return 0 on success, negative on error (bad handle/args/capacity).
+     */
+    fun processFormatted(
+        input: ByteBuffer,
+        inputFormat: PcmFormat,
+        output: ByteBuffer,
+        outputFormat: PcmFormat,
+        numFrames: Int,
+    ): Int {
+        val h = handleRef.get()
+        if (h == 0L) return -1
+        return nativeProcessFormatted(
+            h, input, inputFormat.nativeId, output, outputFormat.nativeId, numFrames,
+        )
+    }
+
+    /**
+     * Increment the native xrun (underrun) counter by [deltaUnderrunFrames]. Called by the
+     * host playback controller after reading `AudioTrack.getUnderrunCount()`.
+     * RT-safe (atomic counter increment only).
      */
     fun recordXrun(deltaUnderrunFrames: Long) {
         val h = handleRef.get()
@@ -380,10 +410,10 @@ class AudioEngine(sampleRate: Int) : Closeable {
      * native handle into JNI would dereference freed memory.** The whole-program
      * invariant is:
      *
-     *   `AudioPlayerService.stop()`  →  audio thread joined  →  `engine.close()`.
+     *   host stop (e.g. `MusicPlayerController.close()`)  →  audio thread joined  →  `engine.close()`.
      *
-     * See `AudioPlayerService.stop()` for the lifecycle contract that callers MUST
-     * uphold. Violating that ordering is undefined behavior.
+     * The host playback controller owns this ordering (in this app, `AutoEqViewModel.onCleared()`
+     * drives it). Violating that ordering is undefined behavior.
      */
     override fun close() {
         val h = handleRef.getAndSet(0L)
@@ -534,7 +564,7 @@ class AudioEngine(sampleRate: Int) : Closeable {
         gainsDB: FloatArray,
         qFactors: FloatArray,
     ): Int
-    private external fun nativeSetAutoEqEnabled(handle: Long, enabled: Boolean)
+    private external fun nativeSetAutoEqEnabled(handle: Long, enabled: Boolean, immediate: Boolean)
     private external fun nativeSetManualEqEnabled(handle: Long, enabled: Boolean)
     private external fun nativeSetAutoEqPreampEnabled(handle: Long, enabled: Boolean)
     // Stage C: Loudness Compensation (ISO 226:2023)
@@ -555,6 +585,14 @@ class AudioEngine(sampleRate: Int) : Closeable {
     )
     private external fun nativeUpdateSampleRate(handle: Long, newRate: Int): Int
     private external fun nativeProcessDirectBuffer(handle: Long, buffer: ByteBuffer, numFrames: Int): Int
+    private external fun nativeProcessFormatted(
+        handle: Long,
+        inBuffer: ByteBuffer,
+        inFormat: Int,
+        outBuffer: ByteBuffer,
+        outFormat: Int,
+        numFrames: Int,
+    ): Int
     private external fun nativeGetDiagnostics(handle: Long): LongArray
     private external fun nativeGetAppliedSnapshot(handle: Long): LongArray
     private external fun nativeRecordXrun(handle: Long, deltaUnderrunFrames: Long)
