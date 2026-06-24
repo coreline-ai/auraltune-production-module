@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "html-to-docx": "^1.8.0",
+    "puppeteer": "^25.2.0"
+  }
+}
