@@ -1,0 +1,3 @@
+{"type":"vendor","id":"zempireaudio","data":{"name":"ZEMPIREAUDIO"}}
+{"type":"product","id":"zempireaudio_ze51b","data":{"name":"ZE51B","vendor_id":"zempireaudio","type":"in-ear"}}
+{"type":"eq","id":"zempireaudio_ze51b_autoeq","data":{"author":"AutoEQ","details":"GRAS 43AG","source":"https://example.org","preamp":-6.1}}

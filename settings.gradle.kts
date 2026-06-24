@@ -24,3 +24,4 @@ rootProject.name = "auraltune-android"
 include(":app")
 include(":audio-engine")
 include(":autoeq-data")
+include(":opra-data")
