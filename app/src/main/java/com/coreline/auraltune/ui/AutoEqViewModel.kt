@@ -134,22 +134,17 @@ class AutoEqViewModel(
     private val _opraQuery = MutableStateFlow("")
     val opraQuery: StateFlow<String> = _opraQuery.asStateFlow()
 
-    /** OPRA 카탈로그(전체). 검색어가 있으면 [opraResults]가 필터링 결과를 제공. */
-    private val opraCatalog: StateFlow<List<OpraCatalogEntry>> =
-        opraRepository.observeCatalog()
-            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-
-    /** OPRA 검색 결과(빈 검색어면 카탈로그 앞부분). */
+    /** OPRA 검색 결과 — 검색어가 [OPRA_MIN_QUERY_LENGTH]자 이상일 때만 추천 목록을 노출. */
     val opraResults: StateFlow<List<OpraCatalogEntry>> =
         _opraQuery.debounce(DEBOUNCE_MS)
             .flatMapLatest { q ->
-                if (q.isBlank()) {
-                    // 빈 검색어: 카탈로그를 반응형으로 노출 — 백그라운드 import가 OPRA 탭을 연 뒤
-                    // 끝나도 목록이 자동 갱신된다(snapshot 캡처가 아니라 flow 구독).
-                    opraCatalog.map { it.take(OPRA_LIST_LIMIT) }
+                val query = q.trim()
+                if (query.length < OPRA_MIN_QUERY_LENGTH) {
+                    // 2자 미만: 카탈로그 전체를 쏟아내지 않고 빈 목록(안내 문구만 표시).
+                    flow { emit(emptyList<OpraCatalogEntry>()) }
                 } else {
                     flow {
-                        emit(withContext(Dispatchers.Default) { opraRepository.search(q, OPRA_LIST_LIMIT) })
+                        emit(withContext(Dispatchers.Default) { opraRepository.search(query, OPRA_LIST_LIMIT) })
                     }
                 }
             }
@@ -694,6 +689,9 @@ class AutoEqViewModel(
 
         /** Max OPRA rows shown in the list/search (DB-side LIMIT). */
         private const val OPRA_LIST_LIMIT = 100
+
+        /** OPRA 추천 목록을 띄우는 최소 검색어 길이 — 그 미만은 빈 목록(안내만). */
+        private const val OPRA_MIN_QUERY_LENGTH = 2
 
         /**
          * 빠른 선택(스피너) 최초 pre-seed용 큐레이션 프로파일 이름.
