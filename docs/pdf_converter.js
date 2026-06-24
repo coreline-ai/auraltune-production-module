@@ -2,12 +2,21 @@ const puppeteer = require('puppeteer');
 const path = require('path');
 
 (async () => {
+  const inputFile = process.argv[2];
+  const outputFile = process.argv[3];
+  
+  if (!inputFile || !outputFile) {
+    console.error('Usage: node pdf_converter.js <inputFile> <outputFile>');
+    process.exit(1);
+  }
+
   const browser = await puppeteer.launch();
   const page = await browser.newPage();
-  const filePath = path.resolve('opra-commercial-license-report.html');
+  const filePath = path.resolve(inputFile);
+  
   await page.goto(`file://${filePath}`, {waitUntil: 'networkidle0'});
   await page.pdf({
-    path: 'opra-commercial-license-report.pdf',
+    path: outputFile,
     format: 'A4',
     printBackground: true,
     margin: {

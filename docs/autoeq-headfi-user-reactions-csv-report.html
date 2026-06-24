@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AutoEQ Head-Fi 실제 사용자 반응 CSV 분석 리포트</title>
+  <style>
+    :root {
+      --ink: #17212b;
+      --muted: #5d6876;
+      --line: #d8e0e8;
+      --paper: #ffffff;
+      --bg: #edf2f6;
+      --soft: #f6f8fb;
+      --blue: #245b76;
+      --blue-dark: #15384a;
+      --teal: #167260;
+      --amber: #9a6500;
+      --red: #a2323d;
+      --violet: #66509b;
+      --gray: #697386;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Roboto, Arial, sans-serif;
+      line-height: 1.64;
+    }
+
+    .page {
+      width: min(1180px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      background: var(--paper);
+      box-shadow: 0 18px 54px rgba(23, 33, 43, 0.14);
+    }
+
+    header {
+      padding: 52px 58px 38px;
+      color: #fff;
+      background:
+        linear-gradient(135deg, rgba(21, 56, 74, 0.97), rgba(36, 91, 118, 0.94) 58%, rgba(22, 114, 96, 0.9)),
+        radial-gradient(circle at 78% 20%, rgba(255,255,255,0.18), rgba(255,255,255,0) 34%);
+    }
+
+    .eyebrow {
+      margin: 0 0 12px;
+      font-size: 13px;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      opacity: 0.88;
+    }
+
+    h1 {
+      max-width: 920px;
+      margin: 0 0 16px;
+      font-size: 35px;
+      line-height: 1.22;
+      letter-spacing: 0;
+    }
+
+    header p {
+      max-width: 920px;
+      margin: 0;
+      color: rgba(255,255,255,0.92);
+      font-size: 17px;
+    }
+
+    main {
+      padding: 34px 58px 58px;
+    }
+
+    section {
+      padding: 30px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child {
+      border-bottom: 0;
+    }
+
+    h2 {
+      margin: 0 0 16px;
+      color: var(--blue-dark);
+      font-size: 24px;
+      line-height: 1.32;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 26px 0 12px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    a {
+      color: var(--blue);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
+
+    .meta,
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 22px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .pill,
+    .tag-list li {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+    }
+
+    .pill {
+      border: 1px solid rgba(255,255,255,0.28);
+      background: rgba(255,255,255,0.13);
+      color: #fff;
+    }
+
+    .tag-list li {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+    }
+
+    .nav {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin: 24px 0 6px;
+    }
+
+    .nav a {
+      display: block;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      color: var(--blue-dark);
+      font-size: 14px;
+      text-decoration: none;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin: 24px 0 8px;
+    }
+
+    .metric {
+      min-height: 104px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--blue-dark);
+      font-size: 28px;
+      line-height: 1.15;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .metric span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .callout {
+      margin: 20px 0;
+      padding: 18px 20px;
+      border-left: 5px solid var(--blue);
+      border-radius: 0 8px 8px 0;
+      background: #edf5f8;
+    }
+
+    .risk {
+      border-left-color: var(--red);
+      background: #fff1f3;
+    }
+
+    .warn {
+      border-left-color: var(--amber);
+      background: #fff7e7;
+    }
+
+    table {
+      width: 100%;
+      margin: 18px 0;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+    }
+
+    th {
+      background: #eef4f8;
+      color: var(--blue-dark);
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .charts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin: 20px 0;
+    }
+
+    .chart {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .chart h3 {
+      margin-top: 0;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 86px 1fr 42px;
+      align-items: center;
+      gap: 10px;
+      margin: 12px 0;
+      font-size: 14px;
+    }
+
+    .track {
+      height: 13px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: #dde7ee;
+    }
+
+    .bar {
+      height: 100%;
+      border-radius: 999px;
+    }
+
+    .positive { background: var(--teal); }
+    .mixed { background: var(--amber); }
+    .negative { background: var(--red); }
+    .limited { background: var(--violet); }
+    .failed { background: var(--gray); }
+    .easy { background: var(--blue); }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .badge.positive { background: var(--teal); }
+    .badge.mixed { background: var(--amber); }
+    .badge.negative { background: var(--red); }
+    .badge.limited { background: var(--violet); }
+    .badge.failed { background: var(--gray); }
+    .badge.easy { background: var(--blue); }
+    .badge.unknown { background: #7b8794; }
+
+    .case-table td {
+      font-size: 13px;
+    }
+
+    .quote {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .panel {
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+    }
+
+    .panel h3 {
+      margin-top: 0;
+    }
+
+    ul {
+      margin-top: 8px;
+      padding-left: 22px;
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    .source-note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer {
+      padding: 28px 58px 44px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      background: #f8fafc;
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      header,
+      main,
+      footer {
+        padding-left: 24px;
+        padding-right: 24px;
+      }
+
+      h1 {
+        font-size: 28px;
+      }
+
+      .nav,
+      .metrics,
+      .charts,
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="eyebrow">AuralTune Research Data Report</p>
+      <h1>AutoEQ Head-Fi 실제 사용자 반응 CSV 분석 리포트</h1>
+      <p>
+        `AutoEQ_HeadFi_Review_Data_CSV` 폴더의 7개 CSV를 기준으로,
+        Head-Fi 공개 게시물에서 추출된 실제 AutoEQ 직접 사용 반응을 정리했습니다.
+        본 문서는 사용자 반응, 적용 실패, 청감 평가, 지속 사용 여부, AuralTune 설계 시사점을 데이터 표본 중심으로 요약합니다.
+      </p>
+      <div class="meta" aria-label="문서 메타데이터">
+        <span class="pill">기준일: 2026-06-24</span>
+        <span class="pill">핵심 표본: Included_Experiences 17건</span>
+        <span class="pill">근거 맵: Evidence_Map 53행</span>
+        <span class="pill">출처: Head-Fi 공개 게시물</span>
+      </div>
+    </header>
+
+    <main>
+      <nav class="nav" aria-label="목차">
+        <a href="#overview">1. 핵심 결론</a>
+        <a href="#dataset">2. 데이터셋 구조</a>
+        <a href="#distribution">3. 반응 분포</a>
+        <a href="#cases">4. 실제 사례 매트릭스</a>
+        <a href="#patterns">5. 반응 패턴</a>
+        <a href="#uncertain">6. 제외·불확실 사례</a>
+        <a href="#product">7. AuralTune 반영안</a>
+        <a href="#limits">8. 해석 한계</a>
+      </nav>
+
+      <section id="overview">
+        <h2>1. 핵심 결론</h2>
+        <p>
+          CSV 내부 데이터 기준으로 AutoEQ 직접 사용 반응은 단순히 “좋다/나쁘다”로 갈리지 않습니다.
+          적용 자체는 대체로 성공했지만, 최종 지속 여부는 청감 만족, 결과 신뢰, 기기별 궁합, 사용자가 원하는 원래 성향 보존 여부에 크게 좌우됐습니다.
+        </p>
+
+        <div class="metrics">
+          <div class="metric">
+            <strong>17</strong>
+            <span>A+B 직접 경험 사례. 실제 적용 또는 구체적 시도가 확인된 핵심 분석 단위입니다.</span>
+          </div>
+          <div class="metric">
+            <strong>15</strong>
+            <span>설정 성공 사례. 적용까지는 대체로 도달했지만, 청감 만족과는 별개입니다.</span>
+          </div>
+          <div class="metric">
+            <strong>8 / 14</strong>
+            <span>청감 언급 사례 중 긍정. 부정 3건, 혼합 3건도 함께 확인됐습니다.</span>
+          </div>
+          <div class="metric">
+            <strong>7 / 17</strong>
+            <span>지속 사용. 기본값 지속 4건, 수정 후 지속 3건입니다.</span>
+          </div>
+        </div>
+
+        <div class="callout">
+          <strong>요약 판단:</strong>
+          AutoEQ는 잘 맞는 환경에서는 빠른 개선 도구로 받아들여졌지만,
+          그대로 영구 정착하는 비율은 제한적이었습니다. 실제 반응은
+          “기본값 그대로 만족”, “수정 후 만족”, “특정 기기에서만 사용”, “청감 불만으로 중단”이 공존합니다.
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>관찰 항목</th>
+              <th>분석 결과</th>
+              <th>제품 관점 의미</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>설정 성공</td>
+              <td>17건 중 15건 성공, 1건 혼합, 1건 실패</td>
+              <td>진입 자체보다 적용 후 신뢰와 만족이 더 큰 과제</td>
+            </tr>
+            <tr>
+              <td>청감 반응</td>
+              <td>긍정 8, 부정 3, 혼합 3, 미언급 3</td>
+              <td>기기별 궁합과 개인 취향 차이를 UI에서 인정해야 함</td>
+            </tr>
+            <tr>
+              <td>최종 행동</td>
+              <td>지속 7, 제한적 사용 5, 중단 4, 실패 1</td>
+              <td>프리셋 적용 후 A/B 비교, 되돌리기, 강도 조절이 필요</td>
+            </tr>
+            <tr>
+              <td>개인 조정</td>
+              <td>명시적 조정 4건, 그중 3건은 수정 후 지속</td>
+              <td>AutoEQ를 완성형 정답보다 tweak baseline으로 쓰는 층 존재</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="dataset">
+        <h2>2. 데이터셋 구조</h2>
+        <p>
+          분석에 사용한 CSV는 후보 발견, 포함 사례, 제외 사례, 증거 맵, 요약 지표가 분리된 구조입니다.
+          본 HTML의 핵심 수치는 `Included_Experiences.csv`와 `Summary_Tables.csv`를 기준으로 산출했고,
+          대표 반응 문구는 `Evidence_Map.csv` 및 `Included_Experiences.csv`의 짧은 evidence excerpt를 사용했습니다.
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>파일</th>
+              <th class="num">행 수</th>
+              <th>주요 역할</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Candidate_Posts.csv</td><td class="num">23</td><td>검토 후보 게시물과 포함/제외 판정</td></tr>
+            <tr><td>Included_Experiences.csv</td><td class="num">17</td><td>A+B 직접 경험 사례의 기기, 앱, 사용성, 청감, 최종 행동</td></tr>
+            <tr><td>Evidence_Map.csv</td><td class="num">53</td><td>주장별 근거 excerpt와 사례 연결</td></tr>
+            <tr><td>Summary_Tables.csv</td><td class="num">63</td><td>검색 흐름, 신뢰도, 청감, 지속 사용, 앱 분포 집계</td></tr>
+            <tr><td>Search_Log.csv</td><td class="num">58</td><td>검색 쿼리와 발견 URL 기록</td></tr>
+            <tr><td>Excluded_Posts.csv</td><td class="num">5</td><td>직접 경험 부족 또는 검증 불가로 제외된 글</td></tr>
+            <tr><td>Uncertain_Cases.csv</td><td class="num">2</td><td>구체적 시도는 있으나 적용·결과가 확인되지 않은 C 사례</td></tr>
+          </tbody>
+        </table>
+
+        <h3>표본 흐름</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>단계</th>
+              <th class="num">수치</th>
+              <th>해석</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>검색 후보 기록</td><td class="num">58</td><td>검색 결과 행 단위</td></tr>
+            <tr><td>고유 URL</td><td class="num">23</td><td>중복 제거 후 검토 대상</td></tr>
+            <tr><td>포함 게시물·페이지</td><td class="num">16</td><td>직접 사용 또는 구체적 시도 근거가 충분한 글</td></tr>
+            <tr><td>A+B 최종 경험 사례</td><td class="num">17</td><td>한 페이지에서 상반된 앱 결과가 있으면 사례를 분리</td></tr>
+            <tr><td>C 불확실 사례</td><td class="num">2</td><td>핵심 비율에서는 제외</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="distribution">
+        <h2>3. 반응 분포</h2>
+        <p>
+          전체 분포에서 가장 중요한 점은 설정 성공률과 청감 만족률이 다르다는 것입니다.
+          사용자는 대체로 적용까지는 갔지만, 계속 쓰느냐는 소리 변화가 자신의 기대와 맞는지에 달려 있었습니다.
+        </p>
+
+        <div class="charts">
+          <div class="chart" aria-label="청감 반응 분포">
+            <h3>청감 반응</h3>
+            <p class="source-note">A+B 17건 기준. 청감 미언급 3건 포함.</p>
+            <div class="bar-row"><span>긍정</span><div class="track"><div class="bar positive" style="width:47.1%"></div></div><strong>8</strong></div>
+            <div class="bar-row"><span>부정</span><div class="track"><div class="bar negative" style="width:17.6%"></div></div><strong>3</strong></div>
+            <div class="bar-row"><span>혼합</span><div class="track"><div class="bar mixed" style="width:17.6%"></div></div><strong>3</strong></div>
+            <div class="bar-row"><span>미언급</span><div class="track"><div class="bar failed" style="width:17.6%"></div></div><strong>3</strong></div>
+          </div>
+
+          <div class="chart" aria-label="최종 행동 분포">
+            <h3>최종 행동</h3>
+            <p class="source-note">A+B 17건 기준.</p>
+            <div class="bar-row"><span>지속</span><div class="track"><div class="bar positive" style="width:41.2%"></div></div><strong>7</strong></div>
+            <div class="bar-row"><span>제한</span><div class="track"><div class="bar limited" style="width:29.4%"></div></div><strong>5</strong></div>
+            <div class="bar-row"><span>중단</span><div class="track"><div class="bar negative" style="width:23.5%"></div></div><strong>4</strong></div>
+            <div class="bar-row"><span>실패</span><div class="track"><div class="bar failed" style="width:5.9%"></div></div><strong>1</strong></div>
+          </div>
+
+          <div class="chart" aria-label="사용성 분포">
+            <h3>사용성</h3>
+            <p class="source-note">overall_usability 기준.</p>
+            <div class="bar-row"><span>쉬움</span><div class="track"><div class="bar easy" style="width:52.9%"></div></div><strong>9</strong></div>
+            <div class="bar-row"><span>미언급</span><div class="track"><div class="bar failed" style="width:29.4%"></div></div><strong>5</strong></div>
+            <div class="bar-row"><span>혼합</span><div class="track"><div class="bar mixed" style="width:11.8%"></div></div><strong>2</strong></div>
+            <div class="bar-row"><span>실패</span><div class="track"><div class="bar negative" style="width:5.9%"></div></div><strong>1</strong></div>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>분석 축</th>
+              <th>상위 관찰</th>
+              <th>주의 해석</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>앱 분포</td>
+              <td>Wavelet 4건, Qudelix 5K 3건, autoeq.app 2건, unknown/manual 5건</td>
+              <td>앱별 성능 비교가 아니라 검토 표본에서 보인 빈도</td>
+            </tr>
+            <tr>
+              <td>기기 분포</td>
+              <td>headphone 7건, IEM/earbud 7건, mixed 1건, unknown 2건</td>
+              <td>모델별 표본이 대부분 1건이라 일반화 불가</td>
+            </tr>
+            <tr>
+              <td>OS 분포</td>
+              <td>Android 4건, embedded/hardware 4건, unknown/web 7건, Windows 1건, macOS 1건</td>
+              <td>플랫폼별 비교보다 사용 맥락 확인용</td>
+            </tr>
+            <tr>
+              <td>Journey issue</td>
+              <td>수동 입력·제어 한계 2건, 호환성·신호 경로 실패 1건</td>
+              <td>적용 전 장벽은 C 사례까지 보면 더 커질 수 있음</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="cases">
+        <h2>4. 실제 사용자 반응 사례 매트릭스</h2>
+        <p>
+          아래 표는 `Included_Experiences.csv`의 17개 A+B 사례를 사용자 반응 중심으로 다시 정리한 것입니다.
+          인용은 CSV에 저장된 짧은 evidence excerpt만 사용했고, 상세 내용은 evidence summary를 한국어로 요약했습니다.
+        </p>
+
+        <table class="case-table">
+          <thead>
+            <tr>
+              <th>Case</th>
+              <th>기기 / 앱</th>
+              <th>사용성</th>
+              <th>청감</th>
+              <th>최종 행동</th>
+              <th>실제 반응 요약</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://www.head-fi.org/showcase/hifiman-he1000-unveiled.28248/reviews">C001</a><br>A</td>
+              <td>HiFiMAN HE1000 Unveiled<br>Wavelet</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge negative">negative</span></td>
+              <td>음질 불만으로 중단</td>
+              <td>적용은 쉬웠지만 개선되지 않는다고 판단했습니다.<span class="quote">“did not improve”</span></td>
+            </tr>
+            <tr>
+              <td><a href="https://www.head-fi.org/threads/astell-kern-sr25-the-next-a-norma-player.926918/page-57">C002</a><br>B</td>
+              <td>Sony WH-1000XM3 외<br>SR25 built-in EQ</td>
+              <td><span class="badge mixed">mixed</span></td>
+              <td><span class="badge mixed">mixed</span></td>
+              <td>특정 기기에서만 사용</td>
+              <td>Sony는 저역 개선을 좋아했지만 HD599와 Final E4000은 다르게 반응했습니다.<span class="quote">“I like very much the result with the Sony WH-1000xm3”</span></td>
+            </tr>
+            <tr>
+              <td>C003<br>B</td>
+              <td>Audeze iSINE series<br>unknown</td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>수정 후 지속 사용</td>
+              <td>기본값을 완성형 정답보다 조정 출발점으로 받아들였습니다.<span class="quote">“good baseline to tweak”</span></td>
+            </tr>
+            <tr>
+              <td><a href="https://www.head-fi.org/threads/autoeq-app-is-a-web-application-for-equalizing-headphones-the-easy-way.968185/page-2">C004</a><br>B</td>
+              <td>unknown<br>autoeq.app</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td>가끔 또는 비교용</td>
+              <td>웹 기반 모델 선택 흐름을 단순하고 직관적으로 평가했습니다.<span class="quote">“simple and intuitive”</span></td>
+            </tr>
+            <tr>
+              <td><a href="https://www.head-fi.org/threads/bowers-and-wilkins-px8-wireless-discussion.964955/page-365">C005</a><br>A</td>
+              <td>Bowers &amp; Wilkins PX8<br>Wavelet</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>기본 프리셋 지속</td>
+              <td>Wavelet 통합 AutoEQ 프로파일을 적용하고 전반적 개선을 보고했습니다.<span class="quote">Wavelet AutoEQ profile used on PX8</span></td>
+            </tr>
+            <tr>
+              <td>C006<br>A</td>
+              <td>Denon AH-D7200<br>manual PEQ</td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td><span class="badge negative">negative</span></td>
+              <td>음질 불만으로 중단</td>
+              <td>원래 선호하던 Denon 성향과 맞지 않아 좋아하지 않았습니다.<span class="quote">“did not like”</span></td>
+            </tr>
+            <tr>
+              <td>C007<br>A</td>
+              <td>earbud unknown<br>Peace + Equalizer APO</td>
+              <td><span class="badge mixed">mixed</span></td>
+              <td><span class="badge negative">negative</span></td>
+              <td>음질 불만으로 중단</td>
+              <td>수동 EQ 경로에서 결과가 일관되지 않고 좋지 않다고 평가했습니다.<span class="quote">“inconsistent” / “poor”</span></td>
+            </tr>
+            <tr>
+              <td>C008<br>A</td>
+              <td>earbud unknown<br>Qudelix 5K</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>기본 프리셋 지속</td>
+              <td>Qudelix 5K에서는 같은 계열 설정이 훨씬 낫게 받아들여졌습니다.<span class="quote">“much better”</span></td>
+            </tr>
+            <tr>
+              <td>C009<br>A</td>
+              <td>multiple headphones<br>unknown EQ software</td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>가끔 또는 비교용</td>
+              <td>AutoEQ 경험을 매우 인상적인 청취 경험으로 표현했습니다.<span class="quote">“revelatory”</span></td>
+            </tr>
+            <tr>
+              <td>C010<br>A</td>
+              <td>Focal Elegia<br>eqMac</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>수정 후 지속 사용</td>
+              <td>Elegia를 Clear에 가까운 방향으로 쉽게 바꿔 쓰는 조정 사례입니다.<span class="quote">“easily change the tuning”</span></td>
+            </tr>
+            <tr>
+              <td>C011<br>A</td>
+              <td>HiFiMAN Edition XS<br>Wavelet</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>기본 프리셋 지속</td>
+              <td>변화는 미묘하지만 디테일과 펀치가 늘었다고 평가했습니다.<span class="quote">“subtle” with more “detail” and “punch”</span></td>
+            </tr>
+            <tr>
+              <td>C012<br>A</td>
+              <td>Audeze LCD-i3<br>Wavelet</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>기본 프리셋 지속</td>
+              <td>기본 상태보다 훨씬 낫다고 직접 비교했습니다.<span class="quote">“way better than stock”</span></td>
+            </tr>
+            <tr>
+              <td>C013<br>A</td>
+              <td>unknown<br>autoeq.app</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge mixed">mixed</span></td>
+              <td>일시 사용 후 해제</td>
+              <td>사용은 했지만 결과가 맞는지 확신하지 못해 해제했습니다.<span class="quote">“not sure about the results”</span></td>
+            </tr>
+            <tr>
+              <td>C014<br>B</td>
+              <td>IEM unspecified<br>unknown</td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td>특정 기기에서만 사용</td>
+              <td>직접 사용은 확인됐지만 청감 방향과 지속 여부의 세부 확정은 제한적입니다.<span class="quote">direct AutoEQ use stated</span></td>
+            </tr>
+            <tr>
+              <td>C015<br>A</td>
+              <td>Technics EAH-AZ70W<br>AutoEQ-compatible app</td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td><span class="badge positive">positive</span></td>
+              <td>수정 후 지속 사용</td>
+              <td>ANC OFF 조건에 맞춘 수정판을 공유했고 해상도와 타이트함 개선을 보고했습니다.<span class="quote">“I share my revised Autoeq … ANC mode OFF”</span></td>
+            </tr>
+            <tr>
+              <td>C016<br>A</td>
+              <td>Apple AirPods Pro<br>Qudelix 5K</td>
+              <td><span class="badge failed">failed</span></td>
+              <td><span class="badge unknown">not mentioned</span></td>
+              <td>적용 실패</td>
+              <td>앱 목록에 프로필이 있어도 Qudelix 5K 신호 경로상 TWS 송신이 불가능했습니다.<span class="quote">“Qudelix-5K is not a bluetooth transmitter”</span></td>
+            </tr>
+            <tr>
+              <td>C017<br>A</td>
+              <td>multiple headphones<br>Qudelix 5K</td>
+              <td><span class="badge easy">easy</span></td>
+              <td><span class="badge mixed">mixed</span></td>
+              <td>가끔 또는 비교용</td>
+              <td>GitHub 값을 옮겨 조정했지만 헤드폰 고유성이 사라지는 느낌 때문에 제한적으로 사용했습니다.<span class="quote">“undoing what makes each headphone unique”</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="patterns">
+        <h2>5. 실제 반응 패턴</h2>
+
+        <div class="two-col">
+          <div class="panel">
+            <h3>긍정 반응</h3>
+            <p>
+              긍정 사례는 주로 통합형 앱이나 불러오기 부담이 낮은 환경에서 나타났습니다.
+              Wavelet, Qudelix 5K, eqMac, AutoEQ-compatible app에서 “much better”, “way better than stock”,
+              “revelatory” 같은 반응이 확인됩니다.
+            </p>
+            <ul>
+              <li>기본 프리셋 그대로 지속: C005, C008, C011, C012</li>
+              <li>수정 후 지속: C003, C010, C015</li>
+              <li>긍정이지만 제한적 사용: C009</li>
+            </ul>
+          </div>
+
+          <div class="panel">
+            <h3>부정·혼합 반응</h3>
+            <p>
+              부정 반응은 설정 실패보다 청감 불만, 결과 불신, 기기 고유성 손실과 더 자주 연결됐습니다.
+              “did not improve”, “did not like”, “not sure about the results”가 대표적입니다.
+            </p>
+            <ul>
+              <li>청감 불만 중단: C001, C006, C007</li>
+              <li>결과 불신 중단: C013</li>
+              <li>기기별 결과 혼합: C002</li>
+              <li>고유성 손실 우려: C017</li>
+            </ul>
+          </div>
+        </div>
+
+        <h3>사용성 관찰</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>패턴</th>
+              <th>근거 사례</th>
+              <th>분석</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>통합형 UI는 낮은 마찰</td>
+              <td>C004, C005, C008, C010, C011, C012</td>
+              <td>모델 선택과 내장 프로파일 적용이 수동 PEQ 입력보다 쉽게 받아들여짐</td>
+            </tr>
+            <tr>
+              <td>수동 입력은 결과 불안정과 연결</td>
+              <td>C002, C007</td>
+              <td>내장 EQ 제약, PEQ 근사, 앱별 적용 차이가 청감 평가를 흔들 수 있음</td>
+            </tr>
+            <tr>
+              <td>프로필 존재와 적용 가능성은 다름</td>
+              <td>C016</td>
+              <td>목록에 AirPods Pro가 있어도 Qudelix 5K가 Bluetooth transmitter가 아니면 적용 불가</td>
+            </tr>
+            <tr>
+              <td>프리앰프·헤드룸 언급 부족</td>
+              <td>Summary_Tables Journey_Issues</td>
+              <td>사용자는 clipping/headroom을 명시적으로 언급하지 않았지만, 앱은 자동 보호가 필요</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>앱·플랫폼 탐색 결과</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>환경</th>
+              <th>CSV상 사례 수</th>
+              <th>반응 해석</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Wavelet</td>
+              <td class="num">4</td>
+              <td>4건 중 긍정 3, 부정 1. Android 통합형 AutoEQ UX의 장점이 보이나 기기 궁합이 좌우함.</td>
+            </tr>
+            <tr>
+              <td>Qudelix 5K</td>
+              <td class="num">3</td>
+              <td>긍정, 혼합, 적용 실패가 모두 존재. 앱보다 신호 경로와 기기 매칭이 중요함.</td>
+            </tr>
+            <tr>
+              <td>autoeq.app</td>
+              <td class="num">2</td>
+              <td>사용성은 좋게 받아들여졌지만 결과 확신 부족으로 중단한 사례도 있음.</td>
+            </tr>
+            <tr>
+              <td>eqMac</td>
+              <td class="num">1</td>
+              <td>쉽게 튜닝 변경 후 지속한 긍정 사례. 다만 C 사례에서는 파일 선택 장벽이 따로 보임.</td>
+            </tr>
+            <tr>
+              <td>Peace + Equalizer APO</td>
+              <td class="num">1</td>
+              <td>수동 입력과 결과 불안정이 부정 청감으로 이어진 사례.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="uncertain">
+        <h2>6. 제외·불확실 사례</h2>
+        <p>
+          제외와 불확실 사례는 핵심 비율에서 빼는 것이 맞지만, 제품 설계 관점에서는 중요합니다.
+          특히 “어디서 올바른 EQ 파일을 받아야 하는지 모름”, “특정 재생 체인에서 실제 적용됐는지 불명확함”은 적용 전 장벽을 보여줍니다.
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>분류</th>
+              <th class="num">건수</th>
+              <th>대표 이유</th>
+              <th>제품 시사점</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>제외 게시물</td>
+              <td class="num">5</td>
+              <td>일반 조언, 기능 설명, 직접 적용 근거 부족, 원문 문맥 검증 불가</td>
+              <td>커뮤니티 언급만으로 직접 사용자 반응으로 계산하면 안 됨</td>
+            </tr>
+            <tr>
+              <td>불확실 사례 UC001</td>
+              <td class="num">1</td>
+              <td>free eqMac에서 올바른 AutoEQ 파일을 어디서 구해야 하는지 질문</td>
+              <td>프로파일 발견과 가져오기 경로를 앱 내부에서 끝내야 함</td>
+            </tr>
+            <tr>
+              <td>불확실 사례 UC002</td>
+              <td class="num">1</td>
+              <td>PowerAmp + Chromecast Audio 체인에서 실제 적용 여부와 결과 불명확</td>
+              <td>재생 체인별 적용 가능성 표시와 적용 확인 피드백 필요</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="product">
+        <h2>7. AuralTune 반영안</h2>
+        <p>
+          CSV 분석 결과는 AuralTune의 AutoEQ/OPRA UI가 단순히 프로파일 목록을 제공하는 수준을 넘어야 한다는 점을 보여줍니다.
+          사용자는 “적용 가능한가”, “소리가 정말 나아졌는가”, “원래 기기 성향을 얼마나 유지할 수 있는가”를 함께 판단합니다.
+        </p>
+
+        <table>
+          <thead>
+            <tr>
+              <th>우선순위</th>
+              <th>반영 항목</th>
+              <th>근거</th>
+              <th>권장 구현</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>긴급</td>
+              <td>적용 가능성 게이트</td>
+              <td>C016의 Qudelix 5K 신호 경로 실패</td>
+              <td>출력 장치, Bluetooth 송수신 여부, 앱 적용 범위를 선택 전 검증</td>
+            </tr>
+            <tr>
+              <td>긴급</td>
+              <td>A/B 비교와 즉시 되돌리기</td>
+              <td>중단 4건 중 다수가 청감 불만 또는 결과 불신</td>
+              <td>원음/보정 토글, 이전 프리셋 복원, quick bypass 제공</td>
+            </tr>
+            <tr>
+              <td>높음</td>
+              <td>보정 강도 조절</td>
+              <td>C017의 기기 고유성 손실 우려</td>
+              <td>0-100% correction amount, 저역/고역 별도 mix 옵션 검토</td>
+            </tr>
+            <tr>
+              <td>높음</td>
+              <td>수정값 저장</td>
+              <td>명시적 개인 조정 4건, 수정 후 지속 3건</td>
+              <td>AutoEQ/OPRA 기반 custom preset 저장과 원본 출처 유지</td>
+            </tr>
+            <tr>
+              <td>중간</td>
+              <td>provider와 조건 메타데이터</td>
+              <td>결과 신뢰와 조건별 차이가 지속 여부에 영향</td>
+              <td>AutoEQ/OPRA, 측정 출처, 앱 조건, ANC ON/OFF, profile source 표시</td>
+            </tr>
+            <tr>
+              <td>중간</td>
+              <td>통합형 검색/적용 UX</td>
+              <td>통합형·내장형 프리셋 환경에서 낮은 설정 마찰</td>
+              <td>파일 다운로드 없이 앱 내부 검색, 미리보기, 적용까지 완료</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="callout">
+          <strong>OPRA 2탭 계획과의 연결:</strong>
+          OPRA를 AutoEQ와 같은 엔진 경로로 적용하더라도, UI에서는 provider와 출처를 분리해야 합니다.
+          이번 CSV는 결과 불신과 기기별 차이가 실제 이탈 요인임을 보여주므로,
+          OPRA 탭에도 출처, 조건, 적용 가능성, A/B 비교가 함께 들어가야 합니다.
+        </div>
+      </section>
+
+      <section id="limits">
+        <h2>8. 해석 한계</h2>
+        <ul>
+          <li>표본은 Head-Fi 공개 게시물 기반이며 AutoEQ 전체 사용자 집단을 대표하지 않습니다.</li>
+          <li>포럼 후기는 자기선택 편향이 크고, 패드 상태, 팁, 밀폐, 볼륨, ANC 상태, 앱 설정이 통제되지 않았습니다.</li>
+          <li>일부 사례는 원문 앵커나 작성자 문맥이 제한적이어서 B 또는 C로 분류됐습니다.</li>
+          <li>앱별 수치는 성능 비교가 아니라 이번 조사 표본에서 관찰된 빈도입니다.</li>
+          <li>짧은 evidence excerpt는 반응 방향 확인용이며, 원문 전체를 대체하지 않습니다.</li>
+        </ul>
+
+        <h3>사용한 CSV 파일</h3>
+        <ul class="tag-list">
+          <li>Candidate_Posts.csv</li>
+          <li>Included_Experiences.csv</li>
+          <li>Evidence_Map.csv</li>
+          <li>Summary_Tables.csv</li>
+          <li>Search_Log.csv</li>
+          <li>Excluded_Posts.csv</li>
+          <li>Uncertain_Cases.csv</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer>
+      원본 데이터 폴더: C:\Users\hwan\Downloads\AutoEQ_HeadFi_Review_Data_CSV.
+      본 문서는 AuralTune 제품 기획과 AutoEQ/OPRA 도입 UX 검토를 위한 내부 분석 리포트입니다.
+      공개 포럼 게시물의 짧은 증거 문구만 사용했으며, 원문 전체 재게시가 아니라 분석 목적의 요약입니다.
+    </footer>
+  </div>
+</body>
+</html>
