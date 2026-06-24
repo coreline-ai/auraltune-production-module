@@ -63,7 +63,10 @@
     <string name="opra_license_label">OPRA data license: CC BY-SA 4.0</string>
     <string name="opra_license_link_label">View CC BY-SA 4.0 license</string>
     <string name="opra_project_link_label">OPRA project on GitHub</string>
-    <string name="opra_no_endorsement">AuralTune is not endorsed, certified, or affiliated with OPRA contributors or Roon Labs. EQ values are used as published; AuralTune only converts their format for playback.</string>
+    <string name="opra_source_data_link_label">OPRA dataset source</string>
+    <!-- CC BY-SA 4.0 attribution requires indicating whether changes were made. -->
+    <string name="opra_changes_notice">Changes: EQ values are used as published by OPRA; AuralTune only converts their format for playback (OPRA-derived, original values preserved).</string>
+    <string name="opra_no_endorsement">AuralTune is not endorsed, certified, or affiliated with OPRA contributors, Roon Labs, or the preset authors.</string>
     <string name="opra_license_not_restricted">This app\'s terms do not restrict any rights granted to you by CC BY-SA 4.0 for the OPRA data.</string>
     <string name="opra_snapshot_commit_format">OPRA snapshot · commit %1$s</string>
     <string name="opra_snapshot_none">OPRA snapshot not loaded yet</string>
@@ -79,5 +82,7 @@
     <string name="opra_detail_apply">Apply this profile</string>
     <string name="opra_detail_unsupported_format">Cannot apply: %1$s</string>
     <string name="opra_detail_close">Close</string>
+    <!-- EQ-detail footnote: indicate changes (format conversion) + no-endorsement, per CC BY-SA 4.0. -->
+    <string name="opra_detail_notice">OPRA-derived: format-converted for playback, original values preserved. Not affiliated with OPRA / Roon Labs.</string>
     <string name="opra_link_open_failed">No app found to open the link</string>
 </resources>

@@ -481,6 +481,7 @@ private fun AuralTuneScreen(
             AboutCard(
                 appVersion = BuildConfig.VERSION_NAME,
                 opraSnapshotCommit = opraSyncState?.opraCommit ?: opraSyncState?.snapshotVersion,
+                opraSourceUrl = opraSyncState?.sourceUrl,
                 onOpenUrl = openUrl,
             )
         }

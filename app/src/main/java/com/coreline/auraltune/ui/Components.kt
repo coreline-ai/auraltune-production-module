@@ -345,6 +345,7 @@ private fun WebLink(text: String, url: String, onOpenUrl: (String) -> Unit) {
 fun AboutCard(
     appVersion: String,
     opraSnapshotCommit: String?,
+    opraSourceUrl: String?,
     onOpenUrl: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -405,6 +406,14 @@ fun AboutCard(
                         url = OPRA_PROJECT_URL,
                         onOpenUrl = onOpenUrl,
                     )
+                    // 데이터 출처(원본 데이터셋) 링크 — attribution 요구사항(원본 링크 제공).
+                    opraSourceUrl?.takeIf { it.isNotBlank() }?.let { src ->
+                        WebLink(
+                            text = stringResource(R.string.opra_source_data_link_label),
+                            url = src,
+                            onOpenUrl = onOpenUrl,
+                        )
+                    }
                     Text(
                         text = opraSnapshotCommit
                             ?.let { stringResource(R.string.opra_snapshot_commit_format, it.take(8)) }
@@ -413,6 +422,12 @@ fun AboutCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     HorizontalDivider()
+                    // 변경 사실 표시(CC BY-SA 4.0 attribution 요구) — 형식 변환만 함을 명시.
+                    Text(
+                        text = stringResource(R.string.opra_changes_notice),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Text(
                         text = stringResource(R.string.opra_no_endorsement),
                         style = MaterialTheme.typography.bodySmall,
@@ -477,6 +492,13 @@ fun OpraProfileDetailDialog(
                         color = MaterialTheme.colorScheme.error,
                     )
                 }
+                HorizontalDivider()
+                // CC BY-SA 4.0 고지(EQ 상세): 변경 사실(형식 변환/OPRA-derived) + 비제휴.
+                Text(
+                    text = stringResource(R.string.opra_detail_notice),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         },
         confirmButton = {
