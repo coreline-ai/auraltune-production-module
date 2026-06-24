@@ -17,3 +17,6 @@ local.properties
 
 # Node tooling (docs converters) — never commit dependencies
 node_modules/
+
+# adb screenshots / uiautomator dumps from manual QA
+_shots/

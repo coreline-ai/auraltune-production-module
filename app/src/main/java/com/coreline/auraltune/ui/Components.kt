@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,12 +17,15 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -33,11 +37,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.coreline.audio.AudioEngine
 import com.coreline.autoeq.model.AutoEqCatalogEntry
 import com.coreline.autoeq.model.AutoEqProfile
 import com.coreline.auraltune.R
+import com.coreline.auraltune.opra.model.OpraEqProfile
 
 /**
  * Card showing the currently active AutoEQ profile (if any). The correction / preamp
@@ -87,12 +93,56 @@ fun StatusCard(
     }
 }
 
-/** AutoEQ correction + preamp toggles. Placed directly above the Graphic EQ. */
+/**
+ * 3-way 청취 비교 스위치(원음 / AutoEQ / 내 설정). 기존 킬스위치 + correction 토글을 대체한다.
+ * 선택된 모드는 채워진 버튼, 나머지는 외곽선. 하단 한 줄로 현재 모드를 설명한다.
+ */
 @Composable
-fun AutoEqToggleCard(
-    isEnabled: Boolean,
+fun ListenModeBar(
+    mode: ListenMode,
+    subtitle: String,
+    onSelect: (ListenMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = stringResource(R.string.listen_mode_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ModeButton(stringResource(R.string.listen_mode_original), mode == ListenMode.ORIGINAL) { onSelect(ListenMode.ORIGINAL) }
+                ModeButton(stringResource(R.string.listen_mode_autoeq), mode == ListenMode.AUTOEQ) { onSelect(ListenMode.AUTOEQ) }
+                ModeButton(stringResource(R.string.listen_mode_user), mode == ListenMode.USER) { onSelect(ListenMode.USER) }
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** One segment of [ListenModeBar]: filled when selected, outlined otherwise. */
+@Composable
+private fun RowScope.ModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
+    if (selected) {
+        Button(onClick = onClick, modifier = Modifier.weight(1f)) { Text(label) }
+    } else {
+        OutlinedButton(onClick = onClick, modifier = Modifier.weight(1f)) { Text(label) }
+    }
+}
+
+/** AutoEQ preamp toggle. Directly above the Graphic EQ (correction on/off moved to [ListenModeBar]). */
+@Composable
+fun AutoEqPreampCard(
     preampEnabled: Boolean,
-    onToggleCorrection: () -> Unit,
     onTogglePreamp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -101,11 +151,6 @@ fun AutoEqToggleCard(
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            ToggleRow(
-                label = stringResource(R.string.correction_toggle),
-                checked = isEnabled,
-                onCheckedChange = { onToggleCorrection() },
-            )
             ToggleRow(
                 label = stringResource(R.string.preamp_toggle),
                 checked = preampEnabled,
@@ -275,3 +320,175 @@ fun EmptyStateMessage(message: String) {
 fun TextLinkButton(text: String, onClick: () -> Unit) {
     TextButton(onClick = onClick) { Text(text) }
 }
+
+/** Underlined, primary-colored, clickable text — used for license/source web links. */
+@Composable
+private fun WebLink(text: String, url: String, onOpenUrl: (String) -> Unit) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.primary,
+        textDecoration = TextDecoration.Underline,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onOpenUrl(url) }
+            .padding(vertical = 6.dp),
+    )
+}
+
+/**
+ * Collapsible "About & licenses" card (Phase 5). Surfaces the AutoEq + OPRA attributions, the
+ * CC BY-SA 4.0 license link, the OPRA project link, the loaded snapshot commit, and the
+ * no-endorsement / rights-not-restricted notices required for commercial distribution.
+ */
+@Composable
+fun AboutCard(
+    appVersion: String,
+    opraSnapshotCommit: String?,
+    onOpenUrl: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Card(modifier = modifier.fillMaxWidth()) {
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.about_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = null,
+                )
+            }
+            if (expanded) {
+                Column(
+                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = stringResource(R.string.about_app_version, appVersion),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    HorizontalDivider()
+                    // AutoEq
+                    Text(
+                        text = stringResource(R.string.autoeq_attribution),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    HorizontalDivider()
+                    // OPRA
+                    Text(
+                        text = stringResource(R.string.opra_attribution),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        text = stringResource(R.string.opra_license_label),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    WebLink(
+                        text = stringResource(R.string.opra_license_link_label),
+                        url = OpraEqProfile.LICENSE_URL,
+                        onOpenUrl = onOpenUrl,
+                    )
+                    WebLink(
+                        text = stringResource(R.string.opra_project_link_label),
+                        url = OPRA_PROJECT_URL,
+                        onOpenUrl = onOpenUrl,
+                    )
+                    Text(
+                        text = opraSnapshotCommit
+                            ?.let { stringResource(R.string.opra_snapshot_commit_format, it.take(8)) }
+                            ?: stringResource(R.string.opra_snapshot_none),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    HorizontalDivider()
+                    Text(
+                        text = stringResource(R.string.opra_no_endorsement),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = stringResource(R.string.opra_license_not_restricted),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * OPRA profile detail sheet (Phase 5): shows author / measurement source / license with clickable
+ * links and an explicit Apply action. Unsupported profiles show the reason and disable Apply
+ * (the "no partial apply" policy).
+ */
+@Composable
+fun OpraProfileDetailDialog(
+    profile: OpraEqProfile,
+    onApply: () -> Unit,
+    onOpenUrl: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(profile.profileName) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = profile.author
+                        ?.let { stringResource(R.string.opra_detail_author_format, it) }
+                        ?: stringResource(R.string.opra_detail_author_unknown),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                profile.details?.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                profile.link?.takeIf { it.isNotBlank() }?.let {
+                    WebLink(stringResource(R.string.opra_detail_source_link), it, onOpenUrl)
+                }
+                WebLink(
+                    text = stringResource(R.string.opra_detail_license_link),
+                    url = OpraEqProfile.LICENSE_URL,
+                    onOpenUrl = onOpenUrl,
+                )
+                if (!profile.isSupported) {
+                    Text(
+                        text = stringResource(
+                            R.string.opra_detail_unsupported_format,
+                            profile.unsupportedReason ?: "",
+                        ),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onApply, enabled = profile.isSupported) {
+                Text(stringResource(R.string.opra_detail_apply))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.opra_detail_close)) }
+        },
+    )
+}
+
+/** OPRA upstream project (CC BY-SA 4.0 data / MIT code). */
+private const val OPRA_PROJECT_URL = "https://github.com/opra-project/OPRA"

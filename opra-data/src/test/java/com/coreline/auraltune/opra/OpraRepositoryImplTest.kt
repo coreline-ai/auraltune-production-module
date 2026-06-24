@@ -100,4 +100,40 @@ class OpraRepositoryImplTest {
         assertEquals(2, store.observeCatalog().first().size)
         assertEquals("c2", store.syncState()!!.opraCommit)
     }
+
+    @Test
+    fun refresh_checksumMismatchDuringImport_isFailed_andCacheRetained() = runBlocking {
+        // Seed with a good snapshot (last-good).
+        OpraRepositoryImpl(store, FakeSource(snapshot("c1", listOf(vendor, product, eq("pud:vogue::a", "pud::vogue"))))).refresh()
+        assertEquals(1, store.observeCatalog().first().size)
+
+        // A bundled-style snapshot whose lazy sha256 check fails: a NEW commit (so import proceeds
+        // past NoChange), but iterating the lines throws -> parser fails -> repo returns Failed and
+        // must NOT touch the last-good cache.
+        val badSnapshot = OpraSnapshot(
+            lines = Sequence<String> { throw OpraIntegrityException("sha256 mismatch") },
+            syncState = OpraSyncState(opraCommit = "c2-tampered"),
+        )
+        val r = OpraRepositoryImpl(store, FakeSource(badSnapshot)).refresh()
+        assertTrue(r is OpraSyncResult.Failed)
+        assertEquals(1, store.observeCatalog().first().size)
+        assertEquals("c1", store.syncState()!!.opraCommit)
+    }
+
+    @Test
+    fun refresh_offlineRetainsCache_thenRecoversOnline() = runBlocking {
+        OpraRepositoryImpl(store, FakeSource(snapshot("c1", listOf(vendor, product, eq("pud:vogue::a", "pud::vogue"))))).refresh()
+        assertEquals(1, store.observeCatalog().first().size)
+
+        // Offline: refresh fails but cache + sync state are retained (OPRA tab still usable).
+        assertTrue(OpraRepositoryImpl(store, FakeSource(snapshot = null, fail = true)).refresh() is OpraSyncResult.Failed)
+        assertEquals(1, store.observeCatalog().first().size)
+        assertEquals("c1", store.syncState()!!.opraCommit)
+
+        // Back online with a new commit: recovers and replaces.
+        val newLines = listOf(vendor, product, product2, eq("pud:vogue::a", "pud::vogue"), eq("pud:aria::b", "pud::aria"))
+        assertTrue(OpraRepositoryImpl(store, FakeSource(snapshot("c2", newLines))).refresh() is OpraSyncResult.Updated)
+        assertEquals(2, store.observeCatalog().first().size)
+        assertEquals("c2", store.syncState()!!.opraCommit)
+    }
 }

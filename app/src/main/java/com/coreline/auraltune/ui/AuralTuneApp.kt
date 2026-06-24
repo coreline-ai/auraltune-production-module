@@ -37,7 +37,6 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -60,6 +59,7 @@ import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.MusicPlayerController
+import com.coreline.auraltune.audio.eq.GraphicEqBands
 
 /**
  * Top-level AuralTune Composable. Hosts the [AuralTuneTheme] + [Scaffold] and binds the
@@ -115,7 +115,9 @@ private fun AuralTuneScreen(
     val results by vm.results.collectAsState()
     val catalog by vm.catalogState.collectAsState()
     val selected by vm.selectedProfile.collectAsState()
-    val correctionEnabled by vm.isCorrectionEnabled.collectAsState()
+    val listenMode by vm.listenMode.collectAsState()
+    // AutoEQ 보정이 실제로 들리는 모드(원음 제외) — EQ 그래프 표시 판단에 사용.
+    val autoEqAudible = listenMode != ListenMode.ORIGINAL
     val preampEnabled by vm.preampEnabled.collectAsState()
     val favorites by vm.favoriteIds.collectAsState()
     val diag by vm.diagnostics.collectAsState()
@@ -128,8 +130,38 @@ private fun AuralTuneScreen(
     val opraResults by vm.opraResults.collectAsState()
     val opraQuery by vm.opraQuery.collectAsState()
     val opraRefreshing by vm.opraRefreshing.collectAsState()
+    val opraSyncState by vm.opraSyncState.collectAsState()
+    val opraDetail by vm.opraDetail.collectAsState()
     // 0 = AutoEQ 탭(기존), 1 = OPRA 비교 탭. 적용된 보정(상태카드/토글/그래프)은 공유.
     var selectedSourceTab by remember { mutableStateOf(0) }
+
+    // 외부 링크(라이선스/측정 출처) 열기 — SAF 가드와 동일하게 ActivityNotFound 처리.
+    val linkCtx = LocalContext.current
+    val openUrl: (String) -> Unit = { url ->
+        try {
+            linkCtx.startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (e: android.content.ActivityNotFoundException) {
+            if (BuildConfig.DEBUG) android.util.Log.w("AboutLink", "no browser for $url", e)
+            android.widget.Toast.makeText(
+                linkCtx,
+                linkCtx.getString(R.string.opra_link_open_failed),
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+        }
+    }
+
+    // OPRA 행 탭 → 상세 시트(author/source/license + 적용). null이면 닫힘.
+    opraDetail?.let { detail ->
+        OpraProfileDetailDialog(
+            profile = detail,
+            onApply = { vm.applyOpraDetail() },
+            onOpenUrl = openUrl,
+            onDismiss = { vm.dismissOpraDetail() },
+        )
+    }
 
     // Phase 2 PoC(외부앱 effect-control-session 측정)는 DebugSupport.AudioFxProbeCard 안으로
     // 완전히 이동했다(src/debug=실제, src/release=no-op). main은 probe를 전혀 참조하지 않는다.
@@ -191,27 +223,21 @@ private fun AuralTuneScreen(
             }
         }
 
-        // Kill switch — top zone (moved up from below the results).
+        // 비교 모드(원음/AutoEQ/내 설정) — 상단 존. 기존 킬스위치 + correction 토글을 대체.
         item {
-            val killed by vm.killSwitchEngaged.collectAsState()
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                stringResource(R.string.kill_switch_label),
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                stringResource(R.string.kill_switch_hint),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        Switch(checked = killed, onCheckedChange = vm::setKillSwitchEngaged)
-                    }
-                }
+            val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
+            val subtitle = when (listenMode) {
+                ListenMode.ORIGINAL -> stringResource(R.string.listen_mode_hint_original)
+                ListenMode.AUTOEQ -> stringResource(R.string.listen_mode_hint_autoeq)
+                ListenMode.USER ->
+                    if (userBands) stringResource(R.string.listen_mode_hint_user)
+                    else stringResource(R.string.listen_mode_hint_user_flat)
             }
+            ListenModeBar(
+                mode = listenMode,
+                subtitle = subtitle,
+                onSelect = vm::setListenMode,
+            )
         }
 
         // 소스 탭: AutoEQ(기존) / OPRA(비교). 적용된 보정 UI(상태/토글/그래프)는 탭 아래 공유.
@@ -375,12 +401,22 @@ private fun AuralTuneScreen(
                 }
             } else {
                 items(opraResults, key = { it.id }) { entry ->
+                    // 행 탭 → 상세 시트(author/source/license + 적용). 적용은 시트의 버튼에서.
                     OpraCatalogRow(
                         entry = entry,
                         isSelected = selected?.id == entry.id,
-                        onClick = { vm.selectOpraProfile(entry) },
+                        onClick = { vm.openOpraDetail(entry) },
                     )
                 }
+            }
+            // OPRA 탭 라이선스/비제휴 고지(상시 노출). 상세 출처/라이선스는 About 카드 + 상세 시트.
+            item {
+                Text(
+                    text = stringResource(R.string.opra_tab_footer),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                )
             }
         }
 
@@ -392,12 +428,10 @@ private fun AuralTuneScreen(
             )
         }
 
-        // AutoEQ correction + preamp 토글 — 그래픽 EQ 바로 위로 이동.
+        // AutoEQ preamp 토글 — 그래픽 EQ 바로 위. (보정 on/off는 비교 모드 바로 이동)
         item {
-            AutoEqToggleCard(
-                isEnabled = correctionEnabled,
+            AutoEqPreampCard(
                 preampEnabled = preampEnabled,
-                onToggleCorrection = vm::toggleCorrection,
                 onTogglePreamp = vm::togglePreamp,
             )
         }
@@ -406,15 +440,15 @@ private fun AuralTuneScreen(
         item {
             GraphicEqCard(
                 bandGains = bandGains,
-                // 그래프엔 correction이 켜졌을 때만 AutoEQ 곡선/preamp를 합성한다(실제 신호와 일치).
-                autoEqFilters = if (correctionEnabled) selected?.filters.orEmpty() else emptyList(),
+                // 그래프엔 보정이 들리는 모드(원음 제외)에서만 AutoEQ 곡선/preamp를 합성(실제 신호와 일치).
+                autoEqFilters = if (autoEqAudible) selected?.filters.orEmpty() else emptyList(),
                 presets = eqPresets,
                 selectedPresetId = selectedPresetId,
                 gainLimitDb = gainLimit,
-                preampDb = if (correctionEnabled) selected?.preampDB ?: 0f else 0f,
+                preampDb = if (autoEqAudible) selected?.preampDB ?: 0f else 0f,
                 showPreamp = showPreamp,
-                // 실제 출력 반영: correction+preamp 둘 다 켜졌을 때만 곡선을 preampDb만큼 하강.
-                preampApplied = correctionEnabled && preampEnabled,
+                // 실제 출력 반영: 보정 가청 + preamp 둘 다 켜졌을 때만 곡선을 preampDb만큼 하강.
+                preampApplied = autoEqAudible && preampEnabled,
                 onBandChange = vm::setBandGain,
                 onGainLimitChange = vm::setGainLimit,
                 onToggleShowPreamp = vm::setShowPreampOnGraph,
@@ -441,13 +475,13 @@ private fun AuralTuneScreen(
             item { DebugSupport.AudioFxProbeCard() }
         }
 
-        // Attribution footer
+        // About & licenses — AutoEq + OPRA attribution, CC BY-SA 4.0 link, snapshot commit,
+        // no-endorsement / rights-not-restricted notices (Phase 5, replaces the plain footer).
         item {
-            Text(
-                text = stringResource(R.string.autoeq_attribution),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            AboutCard(
+                appVersion = BuildConfig.VERSION_NAME,
+                opraSnapshotCommit = opraSyncState?.opraCommit ?: opraSyncState?.snapshotVersion,
+                onOpenUrl = openUrl,
             )
         }
     }

@@ -125,6 +125,17 @@ class SettingsStore(context: Context) {
         store.edit { prefs -> prefs[KEY_KILL_SWITCH] = engaged }
     }
 
+    // ----------------- Listen mode (A/B/C compare: ORIGINAL / AUTOEQ / USER) -----------------
+    // 3-way listening switch that replaces the kill switch + AutoEQ-correction toggle:
+    //   ORIGINAL = no EQ (pure passthrough), AUTOEQ = profile only, USER = profile + graphic EQ.
+    // Defaults to USER so a fresh install behaves like "AutoEQ + (flat) user EQ" == AutoEQ.
+    val listenMode: Flow<String> =
+        store.data.map { it[KEY_LISTEN_MODE] ?: LISTEN_USER }
+
+    suspend fun setListenMode(mode: String) {
+        store.edit { prefs -> prefs[KEY_LISTEN_MODE] = mode }
+    }
+
     // ----------------- Graphic EQ: current gains (auto save/restore) -----------------
     /** Live 20-band gains; restored on launch. Always normalized to [GraphicEqBands.COUNT]. */
     val currentGraphicEqGains: Flow<FloatArray> =
@@ -277,6 +288,10 @@ class SettingsStore(context: Context) {
     }
 
     companion object {
+        const val LISTEN_ORIGINAL = "ORIGINAL"
+        const val LISTEN_AUTOEQ = "AUTOEQ"
+        const val LISTEN_USER = "USER"
+
         const val DEFAULT_AUTOEQ_ENABLED = true
         const val DEFAULT_PREAMP_ENABLED = true
         const val DEFAULT_KILL_SWITCH_ENGAGED = false
@@ -288,6 +303,7 @@ class SettingsStore(context: Context) {
         private val KEY_FAVORITE_IDS = stringSetPreferencesKey("favorite_profile_ids")
         private val KEY_PER_DEVICE_SELECTIONS = stringPreferencesKey("per_device_selections_json")
         private val KEY_KILL_SWITCH = booleanPreferencesKey("kill_switch_engaged")
+        private val KEY_LISTEN_MODE = stringPreferencesKey("listen_mode")
         private val KEY_CURRENT_GEQ_GAINS = stringPreferencesKey("graphic_eq_current_gains_json")
         private val KEY_GEQ_PRESETS = stringPreferencesKey("graphic_eq_presets_json")
         private val KEY_SELECTED_GEQ_PRESET = stringPreferencesKey("graphic_eq_selected_preset_id")

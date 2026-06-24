@@ -19,6 +19,8 @@ import com.coreline.auraltune.data.SettingsStore
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 import com.coreline.auraltune.opra.OpraSyncResult
 import com.coreline.auraltune.opra.model.OpraCatalogEntry
+import com.coreline.auraltune.opra.model.OpraEqProfile
+import com.coreline.auraltune.opra.model.OpraSyncState
 import com.coreline.auraltune.opra.toAutoEqProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -32,6 +34,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -100,10 +103,18 @@ class AutoEqViewModel(
     private val _selectedProfile = MutableStateFlow<AutoEqProfile?>(null)
     val selectedProfile: StateFlow<AutoEqProfile?> = _selectedProfile.asStateFlow()
 
-    val isCorrectionEnabled: StateFlow<Boolean> =
-        settings.autoEqEnabled.stateIn(
-            viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_AUTOEQ_ENABLED,
-        )
+    /**
+     * A/B/C 청취 비교 모드 — 킬스위치 + AutoEQ correction 토글을 대체한다.
+     *   ORIGINAL = EQ 미적용(순수 패스스루), AUTOEQ = 프로파일만, USER = 프로파일 + 그래픽 EQ.
+     * 기본 USER(그래픽 EQ가 평탄이라 첫 실행 체감은 AUTOEQ와 동일).
+     */
+    val listenMode: StateFlow<ListenMode> =
+        settings.listenMode.map { ListenMode.fromKey(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, ListenMode.USER)
+
+    fun setListenMode(mode: ListenMode) {
+        viewModelScope.launch { settings.setListenMode(mode.key) }
+    }
 
     val preampEnabled: StateFlow<Boolean> =
         settings.preampEnabled.stateIn(
@@ -132,13 +143,14 @@ class AutoEqViewModel(
     val opraResults: StateFlow<List<OpraCatalogEntry>> =
         _opraQuery.debounce(DEBOUNCE_MS)
             .flatMapLatest { q ->
-                flow {
-                    val list = if (q.isBlank()) {
-                        opraCatalog.value.take(OPRA_LIST_LIMIT)
-                    } else {
-                        withContext(Dispatchers.Default) { opraRepository.search(q, OPRA_LIST_LIMIT) }
+                if (q.isBlank()) {
+                    // 빈 검색어: 카탈로그를 반응형으로 노출 — 백그라운드 import가 OPRA 탭을 연 뒤
+                    // 끝나도 목록이 자동 갱신된다(snapshot 캡처가 아니라 flow 구독).
+                    opraCatalog.map { it.take(OPRA_LIST_LIMIT) }
+                } else {
+                    flow {
+                        emit(withContext(Dispatchers.Default) { opraRepository.search(q, OPRA_LIST_LIMIT) })
                     }
-                    emit(list)
                 }
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), emptyList())
@@ -146,6 +158,14 @@ class AutoEqViewModel(
     /** OPRA 데이터 갱신 진행 표시. */
     private val _opraRefreshing = MutableStateFlow(false)
     val opraRefreshing: StateFlow<Boolean> = _opraRefreshing.asStateFlow()
+
+    /** OPRA 스냅샷 provenance(commit/version/source/license) — About/진단 표시용. */
+    private val _opraSyncState = MutableStateFlow<OpraSyncState?>(null)
+    val opraSyncState: StateFlow<OpraSyncState?> = _opraSyncState.asStateFlow()
+
+    /** OPRA 행 탭 시 상세(author/source/license + 적용)로 띄울 resolved 프로파일. null이면 닫힘. */
+    private val _opraDetail = MutableStateFlow<OpraEqProfile?>(null)
+    val opraDetail: StateFlow<OpraEqProfile?> = _opraDetail.asStateFlow()
 
     /** 그래픽 EQ(Manual chain) 20밴드 게인(dB). 슬라이더가 변경, debounce 후 엔진 적용. */
     private val _bandGains = MutableStateFlow(FloatArray(GraphicEqBands.COUNT))
@@ -202,17 +222,6 @@ class AutoEqViewModel(
             ),
         )
 
-    /**
-     * Phase 7 — observe local kill-switch state. Declared BEFORE [init] so the
-     * init-block coroutines that read it see a non-null StateFlow.
-     */
-    val killSwitchEngaged: StateFlow<Boolean> =
-        settings.killSwitchEngaged.stateIn(
-            viewModelScope,
-            SharingStarted.Eagerly,
-            SettingsStore.DEFAULT_KILL_SWITCH_ENGAGED,
-        )
-
     init {
         // Phase 2: start the device-route manager here (was DisposableEffectClose in the
         // Composable). The manager + engine are now owned by this retained ViewModel, so
@@ -265,28 +274,21 @@ class AutoEqViewModel(
             }
         }
 
+        // 청취 모드(ORIGINAL/AUTOEQ/USER) + preamp 토글이 엔진 상태를 결정한다.
+        // ORIGINAL = AutoEQ·매뉴얼·preamp 전부 off(순수 원음), AUTOEQ = 프로파일만,
+        // USER = 프로파일 + (비평탄) 그래픽 EQ. 매뉴얼 enable 규칙은 applyGraphicEq와 동일.
         viewModelScope.launch {
-            combine(
-                isCorrectionEnabled,
-                preampEnabled,
-                killSwitchEngaged,
-            ) { c, p, killed -> Triple(c, p, killed) }
-                .collect { (correction, preamp, killed) ->
-                    // Kill switch wins over user toggles. When engaged the engine is
-                    // forced into pure passthrough — both manual and AutoEQ disabled,
-                    // preamp bypassed. P1-4: also propagate to the repository so
-                    // catalog refresh + profile fetch short-circuit immediately.
-                    api.repository.setKillSwitchEngaged(killed)
-                    // Kill switch must bypass instantly (no 0.5 s crossfade) to honor the
-                    // "no DSP passthrough" guarantee; normal correction toggles crossfade.
-                    engine.setAutoEqEnabled(if (killed) false else correction, immediate = killed)
-                    // Manual chain: off when killed, otherwise enabled ONLY if there are
-                    // non-flat bands — same rule as applyGraphicEq, so the two owners agree
-                    // (previously this forced manual ON unconditionally).
-                    engine.setManualEqEnabled(
-                        !killed && GraphicEqBands.toSpecs(_bandGains.value).isNotEmpty(),
-                    )
-                    engine.setAutoEqPreampEnabled(if (killed) false else preamp)
+            combine(listenMode, preampEnabled) { mode, preamp -> mode to preamp }
+                .collect { (mode, preamp) ->
+                    val auto = mode != ListenMode.ORIGINAL
+                    val manual = mode == ListenMode.USER &&
+                        GraphicEqBands.toSpecs(_bandGains.value).isNotEmpty()
+                    // 비교용 전환이지만 클릭 방지를 위해 0.5s 크로스페이드 사용(immediate=false).
+                    engine.setAutoEqEnabled(auto, immediate = false)
+                    engine.setManualEqEnabled(manual)
+                    engine.setAutoEqPreampEnabled(auto && preamp)
+                    // 원음 청취 중엔 백그라운드 카탈로그/프로파일 fetch를 멈춘다(기존 킬스위치 의미 계승).
+                    api.repository.setKillSwitchEngaged(mode == ListenMode.ORIGINAL)
                 }
         }
 
@@ -328,10 +330,15 @@ class AutoEqViewModel(
                 checkProfileUpdates(manual = false)
             }
         }
-        // OPRA: debug 빌드에서 로컬 OPRA가 비어 있으면 1회 자동 import(GitHub raw). release는 소스 미구성.
+        // OPRA: 로컬 OPRA가 비어 있으면 1회 자동 import(debug=GitHub raw, release=번들 스냅샷).
+        // 백그라운드 시드이므로 조용히(스낵바 없이) 처리. 이후 실행은 카탈로그가 차 있어 skip
+        // (번들은 commit 기준 NoChange로도 한 번 더 가드). 번들 검증 실패 시엔 카탈로그가 빈 채로
+        // 남아 다음 콜드스타트에 재시도(크래시/ANR 없음, 업데이트로 자가복구).
         viewModelScope.launch {
-            if (BuildConfig.DEBUG && opraRepository.observeCatalog().first().isEmpty()) {
-                refreshOpra()
+            if (opraRepository.observeCatalog().first().isEmpty()) {
+                syncOpra(notify = false)
+            } else {
+                _opraSyncState.value = opraRepository.syncState()
             }
         }
         // OPRA: 마지막 활성 provider가 OPRA였다면 선택을 복원해 같은 엔진에 적용(AutoEq 복원 뒤에 override).
@@ -364,6 +371,8 @@ class AutoEqViewModel(
             arr[index] = gainDb.coerceIn(-limit, limit)
             _bandGains.value = arr
             markGraphicEqPresetDirty()
+            // 그래픽 EQ를 만지면 '내 설정'으로 자동 전환 — 편집 결과가 즉시 들리게.
+            if (listenMode.value != ListenMode.USER) setListenMode(ListenMode.USER)
         }
     }
 
@@ -447,12 +456,8 @@ class AutoEqViewModel(
             gainsDB = FloatArray(specs.size) { specs[it].gainDb.toFloat() },
             qFactors = FloatArray(specs.size) { specs[it].q.toFloat() },
         )
-        // 빈 체인(전 밴드 0)이거나 kill switch가 켜지면 manual chain off (불필요한 처리/충돌 방지).
-        engine.setManualEqEnabled(specs.isNotEmpty() && !killSwitchEngaged.value)
-    }
-
-    fun setKillSwitchEngaged(engaged: Boolean) {
-        viewModelScope.launch { settings.setKillSwitchEngaged(engaged) }
+        // 매뉴얼 체인은 '내 설정'(USER) 모드에서 비평탄 밴드가 있을 때만 on (combine과 동일 규칙).
+        engine.setManualEqEnabled(specs.isNotEmpty() && listenMode.value == ListenMode.USER)
     }
 
     /** Phase 6 / P3-C: current native sample rate for the diagnostics card. */
@@ -505,28 +510,59 @@ class AutoEqViewModel(
     // ── OPRA 비교 탭 액션 ────────────────────────────────────────────────────────
     fun onOpraQueryChanged(q: String) { _opraQuery.value = q }
 
-    /** OPRA 스냅샷 갱신(debug: GitHub raw fetch). 결과는 스낵바로 표시. */
+    /** OPRA 스냅샷 갱신(release: 번들, debug: GitHub raw). 사용자 버튼 → 스낵바로 결과 표시. */
     fun refreshOpra() {
-        viewModelScope.launch {
-            if (_opraRefreshing.value) return@launch
-            _opraRefreshing.value = true
+        viewModelScope.launch { syncOpra(notify = true) }
+    }
+
+    /**
+     * refresh + provenance 적재를 한 코루틴에서 순차 처리(_opraSyncState를 refresh 완료 후 갱신해
+     * About 카드가 stale/null commit을 보이지 않게 함). [_opraRefreshing]을 잡아 OPRA 탭이
+     * 로딩 상태("불러오는 중…")를 보이게 한다 — 번들 import(압축해제+파싱+Room 삽입)는 수초 걸림.
+     * [notify]=false면 스낵바 없이 조용히 seed(앱 첫 실행 자동 import — 백그라운드 시드).
+     * 진행 중이면 재진입을 막아 중복 import를 방지한다.
+     */
+    private suspend fun syncOpra(notify: Boolean) {
+        if (_opraRefreshing.value) return
+        _opraRefreshing.value = true
+        try {
             val result = withContext(Dispatchers.IO) { opraRepository.refresh() }
-            _opraRefreshing.value = false
-            _importMessage.value = when (result) {
-                is OpraSyncResult.NoChange -> "OPRA: 최신 상태"
-                is OpraSyncResult.Updated -> "OPRA 갱신됨 (제품 ${result.products}, 프로파일 ${result.profiles})"
-                is OpraSyncResult.Failed -> "OPRA 갱신 실패: ${result.reason}"
+            _opraSyncState.value = opraRepository.syncState()
+            if (notify) {
+                _importMessage.value = when (result) {
+                    is OpraSyncResult.NoChange -> "OPRA: 최신 상태"
+                    is OpraSyncResult.Updated -> "OPRA 갱신됨 (제품 ${result.products}, 프로파일 ${result.profiles})"
+                    is OpraSyncResult.Failed -> "OPRA 갱신 실패: ${result.reason}"
+                }
             }
+        } finally {
+            _opraRefreshing.value = false
         }
     }
 
-    /** OPRA 프로파일 선택 → 어댑터로 엔진 입력모델 변환 → 같은 엔진에 적용 + OPRA 활성 기록. */
-    fun selectOpraProfile(entry: OpraCatalogEntry) {
+    /** OPRA 행 탭 → 상세 시트 표시용으로 프로파일을 resolve(적용은 아직 안 함). */
+    fun openOpraDetail(entry: OpraCatalogEntry) {
         viewModelScope.launch {
-            val opra = opraRepository.resolve(entry) ?: run {
+            val opra = opraRepository.resolve(entry)
+            if (opra == null) {
                 _importMessage.value = "OPRA 프로파일을 찾을 수 없습니다"
                 return@launch
             }
+            _opraDetail.value = opra
+        }
+    }
+
+    fun dismissOpraDetail() { _opraDetail.value = null }
+
+    /**
+     * 상세 시트의 '적용' → 이미 resolve된 [opraDetail] 프로파일을 어댑터로 엔진 입력모델로 변환해
+     * 같은 엔진에 적용 + OPRA 활성 기록(재시작 복원용). resolve를 두 번 하지 않는다.
+     */
+    fun applyOpraDetail() {
+        val opra = _opraDetail.value ?: return
+        // 시트를 즉시 닫는다: 더블탭 중복 적용 방지 + 변환 실패(미지원) 시에도 시트가 떠 있지 않게.
+        _opraDetail.value = null
+        viewModelScope.launch {
             val auto = opra.toAutoEqProfile()
             if (auto == null) {
                 _importMessage.value = "이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)"
@@ -535,7 +571,7 @@ class AutoEqViewModel(
             deviceManager.applyResolvedProfile(auto)
             _selectedProfile.value = auto.validated()
             settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
-            settings.setActiveOpraProfileId(entry.id)
+            settings.setActiveOpraProfileId(opra.id)
         }
     }
 
@@ -543,12 +579,6 @@ class AutoEqViewModel(
         viewModelScope.launch {
             deviceManager.clearProfileForCurrentDevice()
             _selectedProfile.value = null
-        }
-    }
-
-    fun toggleCorrection() {
-        viewModelScope.launch {
-            settings.setAutoEqEnabled(!isCorrectionEnabled.value)
         }
     }
 
@@ -620,12 +650,12 @@ class AutoEqViewModel(
      * Incremental profile update: fetch only what changed upstream (delta sync via the GitHub
      * compare API) and upsert into the local DB. [manual]=true surfaces every outcome; the
      * background/auto path stays silent unless something actually changed (avoids startup noise).
-     * Honors the kill switch.
+     * 원음(ORIGINAL) 청취 중엔 건너뛴다(보정을 쓰지 않는 상태).
      */
     fun checkProfileUpdates(manual: Boolean = true) {
         viewModelScope.launch {
-            if (killSwitchEngaged.value) {
-                if (manual) _importMessage.value = "Kill switch ON — 업데이트를 건너뜁니다"
+            if (listenMode.value == ListenMode.ORIGINAL) {
+                if (manual) _importMessage.value = "원음 모드 — 업데이트를 건너뜁니다"
                 return@launch
             }
             if (manual) _importMessage.value = "프로파일 업데이트 확인 중…"
@@ -694,5 +724,19 @@ class AutoEqViewModel(
             "Apple AirPods Pro 2",
             "Audio-Technica ATH-M50x",
         )
+    }
+}
+
+/** A/B/C 청취 비교 모드. 영속 키는 [SettingsStore.listenMode] 문자열. */
+enum class ListenMode(val key: String) {
+    /** EQ 미적용 — 순수 원음(패스스루). */
+    ORIGINAL(SettingsStore.LISTEN_ORIGINAL),
+    /** AutoEQ/OPRA 프로파일만 적용. */
+    AUTOEQ(SettingsStore.LISTEN_AUTOEQ),
+    /** 프로파일 + 사용자 그래픽 EQ(초기엔 평탄이라 AUTOEQ와 동일). */
+    USER(SettingsStore.LISTEN_USER);
+
+    companion object {
+        fun fromKey(key: String): ListenMode = entries.firstOrNull { it.key == key } ?: USER
     }
 }

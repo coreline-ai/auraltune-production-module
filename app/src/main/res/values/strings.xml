@@ -37,10 +37,47 @@
     <string name="diagnostics_total_frames">total processed frames</string>
     <string name="diagnostics_no_device">— no eligible device —</string>
 
-    <!-- Kill switch (P2-E) -->
+    <!-- Kill switch (P2-E) — folded into the listen-mode bar (원음); kept for reference -->
     <string name="kill_switch_label">Kill switch</string>
     <string name="kill_switch_hint">Bypass all DSP — engine becomes pure passthrough</string>
 
+    <!-- Listen-mode A/B/C compare bar -->
+    <string name="listen_mode_title">비교 모드</string>
+    <string name="listen_mode_original">원음</string>
+    <string name="listen_mode_autoeq">AutoEQ</string>
+    <string name="listen_mode_user">내 설정</string>
+    <string name="listen_mode_hint_original">EQ 미적용 — 순수 원음</string>
+    <string name="listen_mode_hint_autoeq">AutoEQ/OPRA 프로파일만 적용</string>
+    <string name="listen_mode_hint_user">프로파일 + 내 그래픽 EQ 보정</string>
+    <string name="listen_mode_hint_user_flat">프로파일 + 내 그래픽 EQ (현재 평탄 = AutoEQ와 동일)</string>
+
     <!-- Attribution (Phase 7 release task) -->
     <string name="autoeq_attribution">Headphone correction profiles courtesy of Jaakko Pasanen\'s AutoEq project (MIT License)</string>
+
+    <!-- About / 정보 (Phase 5: license & attribution) -->
+    <string name="about_title">About &amp; licenses</string>
+    <string name="about_app_version">AuralTune %1$s</string>
+
+    <!-- OPRA attribution & license (CC BY-SA 4.0) -->
+    <string name="opra_attribution">Headphone &amp; EQ data from OPRA (Open Profiles for Revealing Audio), a community database started by Roon Labs.</string>
+    <string name="opra_license_label">OPRA data license: CC BY-SA 4.0</string>
+    <string name="opra_license_link_label">View CC BY-SA 4.0 license</string>
+    <string name="opra_project_link_label">OPRA project on GitHub</string>
+    <string name="opra_no_endorsement">AuralTune is not endorsed, certified, or affiliated with OPRA contributors or Roon Labs. EQ values are used as published; AuralTune only converts their format for playback.</string>
+    <string name="opra_license_not_restricted">This app\'s terms do not restrict any rights granted to you by CC BY-SA 4.0 for the OPRA data.</string>
+    <string name="opra_snapshot_commit_format">OPRA snapshot · commit %1$s</string>
+    <string name="opra_snapshot_none">OPRA snapshot not loaded yet</string>
+
+    <!-- OPRA tab footer -->
+    <string name="opra_tab_footer">OPRA data · CC BY-SA 4.0 · not affiliated with Roon Labs / OPRA</string>
+
+    <!-- OPRA profile detail sheet -->
+    <string name="opra_detail_author_format">Measured by %1$s</string>
+    <string name="opra_detail_author_unknown">Author not specified</string>
+    <string name="opra_detail_source_link">View measurement source</string>
+    <string name="opra_detail_license_link">License: CC BY-SA 4.0</string>
+    <string name="opra_detail_apply">Apply this profile</string>
+    <string name="opra_detail_unsupported_format">Cannot apply: %1$s</string>
+    <string name="opra_detail_close">Close</string>
+    <string name="opra_link_open_failed">No app found to open the link</string>
 </resources>

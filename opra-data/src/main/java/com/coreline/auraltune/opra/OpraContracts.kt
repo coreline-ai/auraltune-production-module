@@ -59,6 +59,8 @@ interface OpraRepository {
     suspend fun resolve(entry: OpraCatalogEntry): OpraEqProfile?
     /** Resolve by profile id (used to restore a persisted OPRA selection on launch). */
     suspend fun resolveById(profileId: String): OpraEqProfile?
-    /** Refresh from the configured source (debug: GitHub raw; release: mirror/cache or bundled). */
+    /** Current snapshot provenance (commit/version/source/license) for the about/diagnostics UI. */
+    suspend fun syncState(): OpraSyncState?
+    /** Refresh from the configured source (debug: GitHub raw; release: bundled snapshot). */
     suspend fun refresh(): OpraSyncResult
 }

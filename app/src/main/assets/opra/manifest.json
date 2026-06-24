@@ -1,0 +1,12 @@
+{
+  "schema_version": "v1",
+  "snapshot_version": "74ed3841d8da05a76fb34a441500603a0afaaae7",
+  "opra_commit": "74ed3841d8da05a76fb34a441500603a0afaaae7",
+  "sha256": "22bce7b2530949fcb4275d4ee090514c86f046ae2c83be1059ad21df3968aac4",
+  "uncompressed_bytes": 12636669,
+  "line_count": 19538,
+  "generated_at": "2026-06-24T05:39:23Z",
+  "source_url": "https://raw.githubusercontent.com/opra-project/OPRA/main/dist/database_v1.jsonl",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0/"
+}

@@ -8,6 +8,7 @@ package com.coreline.auraltune.opra
 import android.util.Log
 import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.opra.model.OpraEqProfile
+import com.coreline.auraltune.opra.model.OpraSyncState
 
 class OpraRepositoryImpl(
     private val store: OpraStore,
@@ -26,6 +27,9 @@ class OpraRepositoryImpl(
 
     override suspend fun resolveById(profileId: String): OpraEqProfile? =
         store.resolve(profileId)
+
+    override suspend fun syncState(): OpraSyncState? =
+        store.syncState()
 
     override suspend fun refresh(): OpraSyncResult {
         val snapshot = runCatching { source.fetch() }.getOrElse {
