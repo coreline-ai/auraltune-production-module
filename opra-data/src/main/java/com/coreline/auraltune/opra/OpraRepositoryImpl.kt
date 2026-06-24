@@ -24,6 +24,9 @@ class OpraRepositoryImpl(
     override suspend fun resolve(entry: OpraCatalogEntry): OpraEqProfile? =
         store.resolve(entry.id)
 
+    override suspend fun resolveById(profileId: String): OpraEqProfile? =
+        store.resolve(profileId)
+
     override suspend fun refresh(): OpraSyncResult {
         val snapshot = runCatching { source.fetch() }.getOrElse {
             Log.w(TAG, "snapshot fetch failed; keeping cache", it)

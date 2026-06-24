@@ -37,6 +37,23 @@ class SettingsStore(context: Context) {
 
     private val store = context.dataStore
 
+    // ----------------- Active correction provider (AUTOEQ vs OPRA comparison) -----------------
+    // Which data source the currently-applied correction came from. Existing installs have no
+    // value → default AUTOEQ (i.e. legacy AutoEqSelection is interpreted as provider=AUTOEQ).
+    val activeCorrectionProvider: Flow<String> =
+        store.data.map { it[KEY_ACTIVE_PROVIDER] ?: PROVIDER_AUTOEQ }
+    suspend fun setActiveCorrectionProvider(provider: String) {
+        store.edit { it[KEY_ACTIVE_PROVIDER] = provider }
+    }
+
+    /** Currently-selected OPRA profile id (used to restore an OPRA selection on launch). */
+    val activeOpraProfileId: Flow<String?> = store.data.map { it[KEY_ACTIVE_OPRA_ID] }
+    suspend fun setActiveOpraProfileId(id: String?) {
+        store.edit { prefs ->
+            if (id == null) prefs.remove(KEY_ACTIVE_OPRA_ID) else prefs[KEY_ACTIVE_OPRA_ID] = id
+        }
+    }
+
     // ----------------- Selected profile -----------------
     val selectedProfileId: Flow<String?> = store.data.map { it[KEY_SELECTED_PROFILE_ID] }
     suspend fun setSelectedProfileId(id: String?) {
@@ -277,6 +294,11 @@ class SettingsStore(context: Context) {
         private val KEY_GEQ_GAIN_LIMIT = floatPreferencesKey("graphic_eq_gain_limit_db")
         private val KEY_GEQ_SHOW_PREAMP = booleanPreferencesKey("graphic_eq_show_preamp")
         private val KEY_LAST_DELTA_CHECK = longPreferencesKey("last_delta_check_ms")
+        private val KEY_ACTIVE_PROVIDER = stringPreferencesKey("active_correction_provider")
+        private val KEY_ACTIVE_OPRA_ID = stringPreferencesKey("active_opra_profile_id")
+
+        const val PROVIDER_AUTOEQ = "AUTOEQ"
+        const val PROVIDER_OPRA = "OPRA"
         private val KEY_RECENT_PROFILES = stringPreferencesKey("recent_profiles_json")
 
         /** Spinner / quick-pick capacity. */

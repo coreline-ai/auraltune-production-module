@@ -191,6 +191,16 @@ class DeviceAutoEqManager(
         return true
     }
 
+    /**
+     * Provider-agnostic engine apply. Used by the OPRA comparison path (the OPRA profile is
+     * converted to [AutoEqProfile] by the adapter in :app, then applied through the SAME engine
+     * path AutoEq uses). [validated] is applied defensively. This intentionally bypasses the
+     * per-device AutoEq selection bookkeeping — the caller (ViewModel) owns active-provider state.
+     */
+    fun applyResolvedProfile(profile: AutoEqProfile) {
+        pushToEngine(profile.validated())
+    }
+
     private fun pushToEngine(p: AutoEqProfile) {
         val n = p.filters.size
         val types = IntArray(n)

@@ -17,6 +17,9 @@ import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.audio.MusicPlayerController
 import com.coreline.auraltune.data.SettingsStore
 import com.coreline.auraltune.audio.eq.GraphicEqBands
+import com.coreline.auraltune.opra.OpraSyncResult
+import com.coreline.auraltune.opra.model.OpraCatalogEntry
+import com.coreline.auraltune.opra.toAutoEqProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.withContext
@@ -61,6 +64,9 @@ class AutoEqViewModel(
         settings = settings,
         coroutineScope = viewModelScope,
     )
+
+    // OPRA comparison source (fully separate data module). Shares THIS engine via the adapter.
+    private val opraRepository = locator.opraRepository
 
     private val _query = MutableStateFlow("")
     val query: StateFlow<String> = _query.asStateFlow()
@@ -112,6 +118,34 @@ class AutoEqViewModel(
     /** 최근(빠른 선택) 프로파일 — 스피너용. 최근 선택순, 최대 10개. 첫 실행 시 10개 pre-seed. */
     val recentProfiles: StateFlow<List<AutoEqCatalogEntry>> =
         settings.recentProfiles.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // ── OPRA 비교 탭 상태 (별도 소스, 같은 엔진) ──────────────────────────────────
+    private val _opraQuery = MutableStateFlow("")
+    val opraQuery: StateFlow<String> = _opraQuery.asStateFlow()
+
+    /** OPRA 카탈로그(전체). 검색어가 있으면 [opraResults]가 필터링 결과를 제공. */
+    private val opraCatalog: StateFlow<List<OpraCatalogEntry>> =
+        opraRepository.observeCatalog()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** OPRA 검색 결과(빈 검색어면 카탈로그 앞부분). */
+    val opraResults: StateFlow<List<OpraCatalogEntry>> =
+        _opraQuery.debounce(DEBOUNCE_MS)
+            .flatMapLatest { q ->
+                flow {
+                    val list = if (q.isBlank()) {
+                        opraCatalog.value.take(OPRA_LIST_LIMIT)
+                    } else {
+                        withContext(Dispatchers.Default) { opraRepository.search(q, OPRA_LIST_LIMIT) }
+                    }
+                    emit(list)
+                }
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(SUBSCRIBE_TIMEOUT_MS), emptyList())
+
+    /** OPRA 데이터 갱신 진행 표시. */
+    private val _opraRefreshing = MutableStateFlow(false)
+    val opraRefreshing: StateFlow<Boolean> = _opraRefreshing.asStateFlow()
 
     /** 그래픽 EQ(Manual chain) 20밴드 게인(dB). 슬라이더가 변경, debounce 후 엔진 적용. */
     private val _bandGains = MutableStateFlow(FloatArray(GraphicEqBands.COUNT))
@@ -294,6 +328,22 @@ class AutoEqViewModel(
                 checkProfileUpdates(manual = false)
             }
         }
+        // OPRA: debug 빌드에서 로컬 OPRA가 비어 있으면 1회 자동 import(GitHub raw). release는 소스 미구성.
+        viewModelScope.launch {
+            if (BuildConfig.DEBUG && opraRepository.observeCatalog().first().isEmpty()) {
+                refreshOpra()
+            }
+        }
+        // OPRA: 마지막 활성 provider가 OPRA였다면 선택을 복원해 같은 엔진에 적용(AutoEq 복원 뒤에 override).
+        viewModelScope.launch {
+            if (settings.activeCorrectionProvider.first() != SettingsStore.PROVIDER_OPRA) return@launch
+            val id = settings.activeOpraProfileId.first() ?: return@launch
+            // OPRA 카탈로그가 적어도 한 번 로드된 뒤 resolve(첫 import 완료 대기).
+            opraRepository.observeCatalog().first { it.isNotEmpty() }
+            val auto = opraRepository.resolveById(id)?.toAutoEqProfile() ?: return@launch
+            deviceManager.applyResolvedProfile(auto)
+            _selectedProfile.value = auto.validated()
+        }
         // 최초 1회: 최근 프로파일이 비어 있으면 카탈로그 Loaded 시점에 큐레이션 10개를 pre-seed.
         // 경합 안전: empty-check+write를 settings 내부 store.edit 1트랜잭션으로 처리(사용자 탭과 무손실).
         viewModelScope.launch {
@@ -447,6 +497,45 @@ class AutoEqViewModel(
             // Record into the quick-pick spinner regardless of route eligibility so the user
             // can re-select later (selection persists via settings.selectedProfileId too).
             settings.addRecentProfile(entry)
+            // Selecting an AutoEQ profile makes AUTOEQ the active correction provider.
+            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+        }
+    }
+
+    // ── OPRA 비교 탭 액션 ────────────────────────────────────────────────────────
+    fun onOpraQueryChanged(q: String) { _opraQuery.value = q }
+
+    /** OPRA 스냅샷 갱신(debug: GitHub raw fetch). 결과는 스낵바로 표시. */
+    fun refreshOpra() {
+        viewModelScope.launch {
+            if (_opraRefreshing.value) return@launch
+            _opraRefreshing.value = true
+            val result = withContext(Dispatchers.IO) { opraRepository.refresh() }
+            _opraRefreshing.value = false
+            _importMessage.value = when (result) {
+                is OpraSyncResult.NoChange -> "OPRA: 최신 상태"
+                is OpraSyncResult.Updated -> "OPRA 갱신됨 (제품 ${result.products}, 프로파일 ${result.profiles})"
+                is OpraSyncResult.Failed -> "OPRA 갱신 실패: ${result.reason}"
+            }
+        }
+    }
+
+    /** OPRA 프로파일 선택 → 어댑터로 엔진 입력모델 변환 → 같은 엔진에 적용 + OPRA 활성 기록. */
+    fun selectOpraProfile(entry: OpraCatalogEntry) {
+        viewModelScope.launch {
+            val opra = opraRepository.resolve(entry) ?: run {
+                _importMessage.value = "OPRA 프로파일을 찾을 수 없습니다"
+                return@launch
+            }
+            val auto = opra.toAutoEqProfile()
+            if (auto == null) {
+                _importMessage.value = "이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)"
+                return@launch
+            }
+            deviceManager.applyResolvedProfile(auto)
+            _selectedProfile.value = auto.validated()
+            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
+            settings.setActiveOpraProfileId(entry.id)
         }
     }
 
@@ -572,6 +661,9 @@ class AutoEqViewModel(
 
         /** Background delta-sync cooldown: auto-check profile updates at most once per 24h. */
         private const val DELTA_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1_000L
+
+        /** Max OPRA rows shown in the list/search (DB-side LIMIT). */
+        private const val OPRA_LIST_LIMIT = 100
 
         /**
          * 빠른 선택(스피너) 최초 pre-seed용 큐레이션 프로파일 이름.

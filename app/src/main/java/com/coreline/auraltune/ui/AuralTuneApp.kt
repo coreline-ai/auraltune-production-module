@@ -27,10 +27,13 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -52,6 +55,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.coreline.autoeq.model.CatalogState
+import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
@@ -121,6 +125,11 @@ private fun AuralTuneScreen(
     val gainLimit by vm.gainLimitDb.collectAsState()
     val showPreamp by vm.showPreampOnGraph.collectAsState()
     val recents by vm.recentProfiles.collectAsState()
+    val opraResults by vm.opraResults.collectAsState()
+    val opraQuery by vm.opraQuery.collectAsState()
+    val opraRefreshing by vm.opraRefreshing.collectAsState()
+    // 0 = AutoEQ 탭(기존), 1 = OPRA 비교 탭. 적용된 보정(상태카드/토글/그래프)은 공유.
+    var selectedSourceTab by remember { mutableStateOf(0) }
 
     // Phase 2 PoC(외부앱 effect-control-session 측정)는 DebugSupport.AudioFxProbeCard 안으로
     // 완전히 이동했다(src/debug=실제, src/release=no-op). main은 probe를 전혀 참조하지 않는다.
@@ -205,6 +214,23 @@ private fun AuralTuneScreen(
             }
         }
 
+        // 소스 탭: AutoEQ(기존) / OPRA(비교). 적용된 보정 UI(상태/토글/그래프)는 탭 아래 공유.
+        item {
+            TabRow(selectedTabIndex = selectedSourceTab) {
+                Tab(
+                    selected = selectedSourceTab == 0,
+                    onClick = { selectedSourceTab = 0 },
+                    text = { Text("AutoEQ") },
+                )
+                Tab(
+                    selected = selectedSourceTab == 1,
+                    onClick = { selectedSourceTab = 1 },
+                    text = { Text("OPRA") },
+                )
+            }
+        }
+
+        if (selectedSourceTab == 0) {
         // Search field
         item {
             OutlinedTextField(
@@ -321,6 +347,42 @@ private fun AuralTuneScreen(
                 }
             }
         }
+        } else {
+            // ── OPRA 비교 탭 ──
+            item {
+                OutlinedTextField(
+                    value = opraQuery,
+                    onValueChange = vm::onOpraQueryChanged,
+                    placeholder = { Text("OPRA 헤드폰 검색…") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                OutlinedButton(
+                    onClick = { vm.refreshOpra() },
+                    enabled = !opraRefreshing,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (opraRefreshing) "OPRA 갱신 중…" else "OPRA 데이터 갱신") }
+            }
+            if (opraResults.isEmpty()) {
+                item {
+                    EmptyStateMessage(
+                        if (opraRefreshing) "OPRA 데이터를 불러오는 중…"
+                        else "OPRA 헤드폰을 검색하거나 'OPRA 데이터 갱신'을 누르세요",
+                    )
+                }
+            } else {
+                items(opraResults, key = { it.id }) { entry ->
+                    OpraCatalogRow(
+                        entry = entry,
+                        isSelected = selected?.id == entry.id,
+                        onClick = { vm.selectOpraProfile(entry) },
+                    )
+                }
+            }
+        }
 
         // 상태 카드(프로파일명 + 닫기) — AutoEQ 토글 바로 위로 이동(그래픽 EQ 위에 프로파일+토글을 묶음).
         item {
@@ -386,6 +448,44 @@ private fun AuralTuneScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+            )
+        }
+    }
+}
+
+/** One OPRA catalog row: product + vendor • author + license. Unsupported rows are dimmed/disabled. */
+@Composable
+private fun OpraCatalogRow(
+    entry: OpraCatalogEntry,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = entry.isSupported, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = entry.productName,
+                style = MaterialTheme.typography.bodyLarge,
+                color = when {
+                    isSelected -> MaterialTheme.colorScheme.primary
+                    !entry.isSupported -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.onSurface
+                },
+            )
+            Text(
+                text = entry.vendorName + (entry.author?.let { " • $it" } ?: ""),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                text = entry.license + (if (!entry.isSupported) " • 적용 불가" else ""),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

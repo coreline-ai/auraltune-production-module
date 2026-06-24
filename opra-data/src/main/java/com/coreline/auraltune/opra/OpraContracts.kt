@@ -57,6 +57,8 @@ interface OpraRepository {
     fun observeCatalog(): Flow<List<OpraCatalogEntry>>
     suspend fun search(query: String, limit: Int = 50): List<OpraCatalogEntry>
     suspend fun resolve(entry: OpraCatalogEntry): OpraEqProfile?
+    /** Resolve by profile id (used to restore a persisted OPRA selection on launch). */
+    suspend fun resolveById(profileId: String): OpraEqProfile?
     /** Refresh from the configured source (debug: GitHub raw; release: mirror/cache or bundled). */
     suspend fun refresh(): OpraSyncResult
 }
