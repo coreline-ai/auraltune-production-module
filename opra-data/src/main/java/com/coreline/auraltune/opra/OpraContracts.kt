@@ -10,12 +10,20 @@ import com.coreline.auraltune.opra.model.OpraSyncState
 import com.coreline.auraltune.opra.model.OpraVendor
 import kotlinx.coroutines.flow.Flow
 
-/** Result of parsing a database_v1.jsonl stream. [malformedLines] are skipped, not fatal. */
+/**
+ * Result of parsing a database_v1.jsonl stream. Malformed lines are skipped (counted in
+ * [malformedLines]), never fatal. [catalogEntries] are the joined product+eq rows for the OPRA
+ * tab. Orphans (eq whose product_id is missing, product whose vendor_id is missing) are counted
+ * but still surfaced as best-effort entries.
+ */
 data class OpraParseResult(
     val vendors: List<OpraVendor> = emptyList(),
     val products: List<OpraProduct> = emptyList(),
     val profiles: List<OpraEqProfile> = emptyList(),
+    val catalogEntries: List<OpraCatalogEntry> = emptyList(),
     val malformedLines: Int = 0,
+    val orphanProfiles: Int = 0,
+    val orphanProducts: Int = 0,
 )
 
 /** Outcome of an OPRA snapshot refresh (mirror/cache or bundled), mirrors AutoEq DeltaResult style. */

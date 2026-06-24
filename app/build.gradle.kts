@@ -93,6 +93,7 @@ dependencies {
     // Internal modules
     implementation(project(":audio-engine"))
     implementation(project(":autoeq-data"))
+    implementation(project(":opra-data"))
 
     // AndroidX core / lifecycle
     implementation(libs.androidx.core.ktx)

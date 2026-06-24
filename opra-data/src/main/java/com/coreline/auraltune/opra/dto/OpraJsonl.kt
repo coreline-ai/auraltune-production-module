@@ -1,11 +1,16 @@
 // OpraJsonl.kt
 // DTOs for the single OPRA `database_v1.jsonl` (one JSON object per line, discriminated by
-// `type`: "vendor" | "product" | "eq"). Verified line shapes:
-//   {"type":"vendor","id":"zempireaudio","data":{"name":"ZEMPIREAUDIO"}}
-//   {"type":"product","id":"...","data":{"name":"ZE51B","vendor_id":"zempireaudio",...}}
-//   {"type":"eq","id":"...","data":{"author":"AutoEQ",...}}
-// The `data` payload is kept as a raw JsonObject here; Phase 2 decodes it per type (the exact
-// `eq` band schema is finalized then). DTO -> domain model mapping also lives in Phase 2.
+// `type`). Field names match the verified OPRA schema exactly. The parser decodes the per-line
+// envelope, then re-decodes `data` into the typed DTO for that `type`. Decode with
+// ignoreUnknownKeys = true (schemas are additionalProperties:false but be defensive).
+//
+//   vendor  : {"type":"vendor","id":"pud","data":{"name":"Pud"}}
+//   product : {"type":"product","id":"pud::vogue","data":{"name":"Vogue","type":"headphones",
+//                "subtype":"over_the_ear","vendor_id":"pud","line_art_svg":"...","line_art_96x64_png":"..."}}
+//   eq      : {"type":"eq","id":"pud:vogue::oratory1990_harman_target","data":{"author":"oratory1990",
+//                "details":"Harman Target","link":"https://...","type":"parametric_eq",
+//                "parameters":{"gain_db":-7,"bands":[{"type":"peak_dip","frequency":200,"gain_db":-7,"q":6},...]},
+//                "product_id":"pud::vogue"}}
 package com.coreline.auraltune.opra.dto
 
 import kotlinx.serialization.SerialName
@@ -23,22 +28,41 @@ data class OpraLineDto(
 @Serializable
 data class OpraVendorDataDto(
     val name: String,
-    @SerialName("logo") val logo: String? = null,
+    @SerialName("official_name") val officialName: String? = null,
+    val blurb: String? = null,
+    val logo: String? = null,
 )
 
 @Serializable
 data class OpraProductDataDto(
     val name: String,
+    val type: String? = null,
+    val subtype: String? = null,
     @SerialName("vendor_id") val vendorId: String? = null,
-    @SerialName("type") val productType: String? = null,
-    @SerialName("aliases") val aliases: List<String> = emptyList(),
+    val blurb: String? = null,
 )
 
 @Serializable
 data class OpraEqDataDto(
     val author: String? = null,
+    val type: String? = null,
     val details: String? = null,
-    val source: String? = null,
-    @SerialName("preamp") val preampDb: Double? = null,
-    // NOTE(Phase 2): the parametric band array shape is finalized when the parser lands.
+    val link: String? = null,
+    val parameters: OpraParametersDto = OpraParametersDto(),
+    @SerialName("product_id") val productId: String? = null,
+)
+
+@Serializable
+data class OpraParametersDto(
+    @SerialName("gain_db") val gainDb: Double = 0.0,
+    val bands: List<OpraBandDto> = emptyList(),
+)
+
+@Serializable
+data class OpraBandDto(
+    val type: String? = null,
+    val frequency: Double = 0.0,
+    @SerialName("gain_db") val gainDb: Double = 0.0,
+    val q: Double = 0.0,
+    val slope: Int? = null,
 )

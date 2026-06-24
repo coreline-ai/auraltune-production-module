@@ -31,15 +31,19 @@ enum class OpraFilterType {
     val isSupported: Boolean get() = toEngine() != null
 
     companion object {
-        /** Parse an OPRA band token (case-insensitive). Common AutoEq/OPRA tokens incl. PK/LSC/HSC. */
+        /**
+         * Parse an OPRA band `type` token (case-insensitive). OPRA's real tokens are lowercase
+         * snake_case (`peak_dip`, `low_shelf`, ...); the short PK/LSC/HSC aliases are kept as a
+         * defensive fallback in case AutoEq-style tokens ever appear.
+         */
         fun fromToken(token: String?): OpraFilterType = when (token?.trim()?.uppercase()) {
-            "PK", "PEAKING", "PEQ" -> PEAKING
-            "LS", "LSC", "LSQ", "LOWSHELF", "LOW_SHELF" -> LOW_SHELF
-            "HS", "HSC", "HSQ", "HIGHSHELF", "HIGH_SHELF" -> HIGH_SHELF
-            "HP", "HPQ", "HIGHPASS", "HIGH_PASS" -> HIGH_PASS
-            "LP", "LPQ", "LOWPASS", "LOW_PASS" -> LOW_PASS
-            "NO", "NOTCH" -> NOTCH
-            "BP", "BANDPASS", "BAND_PASS" -> BAND_PASS
+            "PEAK_DIP", "PK", "PEAKING", "PEQ" -> PEAKING
+            "LOW_SHELF", "LS", "LSC", "LSQ", "LOWSHELF" -> LOW_SHELF
+            "HIGH_SHELF", "HS", "HSC", "HSQ", "HIGHSHELF" -> HIGH_SHELF
+            "HIGH_PASS", "HP", "HPQ", "HIGHPASS" -> HIGH_PASS
+            "LOW_PASS", "LP", "LPQ", "LOWPASS" -> LOW_PASS
+            "BAND_PASS", "BP", "BANDPASS" -> BAND_PASS
+            "BAND_STOP", "NOTCH", "NO" -> NOTCH
             else -> UNKNOWN
         }
     }
