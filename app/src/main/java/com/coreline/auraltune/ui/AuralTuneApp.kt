@@ -274,6 +274,14 @@ private fun AuralTuneScreen(
             }
         }
 
+        // 프로파일 업데이트(증분 delta) 수동 확인 — 결과는 스낵바로 표시.
+        item {
+            OutlinedButton(
+                onClick = { vm.checkProfileUpdates() },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("프로파일 업데이트 확인") }
+        }
+
         // Catalog state / results
         when (val state = catalog) {
             CatalogState.Loading -> item {

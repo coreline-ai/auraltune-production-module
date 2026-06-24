@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -140,6 +141,14 @@ class SettingsStore(context: Context) {
         store.edit { it[KEY_GEQ_SHOW_PREAMP] = show }
     }
 
+    // ----------------- Delta sync (incremental profile update) cooldown -----------------
+    /** Epoch ms of the last background delta-sync check (0 = never). */
+    val lastDeltaCheckMs: Flow<Long> = store.data.map { it[KEY_LAST_DELTA_CHECK] ?: 0L }
+
+    suspend fun setLastDeltaCheckMs(ms: Long) {
+        store.edit { it[KEY_LAST_DELTA_CHECK] = ms }
+    }
+
     // ----------------- Graphic EQ: named presets -----------------
     val graphicEqPresets: Flow<List<GraphicEqPreset>> =
         store.data.map { prefs ->
@@ -267,6 +276,7 @@ class SettingsStore(context: Context) {
         private val KEY_SELECTED_GEQ_PRESET = stringPreferencesKey("graphic_eq_selected_preset_id")
         private val KEY_GEQ_GAIN_LIMIT = floatPreferencesKey("graphic_eq_gain_limit_db")
         private val KEY_GEQ_SHOW_PREAMP = booleanPreferencesKey("graphic_eq_show_preamp")
+        private val KEY_LAST_DELTA_CHECK = longPreferencesKey("last_delta_check_ms")
         private val KEY_RECENT_PROFILES = stringPreferencesKey("recent_profiles_json")
 
         /** Spinner / quick-pick capacity. */

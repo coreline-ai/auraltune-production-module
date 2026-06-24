@@ -1,0 +1,70 @@
+name: Android CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      # Pin the NDK + CMake the project builds against (see gradle/libs.versions.toml).
+      - name: Install NDK + CMake
+        run: sdkmanager "ndk;27.0.12077973" "cmake;3.22.1"
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Pure-JVM tests across all modules (DSP mirror, catalog/DB, repository, delta sync, app VM).
+      - name: Unit tests
+        run: ./gradlew --no-daemon
+          :audio-engine:testDebugUnitTest
+          :autoeq-data:testDebugUnitTest
+          :app:testDebugUnitTest
+
+      # Compiles all native ABIs + Kotlin; packages the debug APK (incl. prebuilt seed asset).
+      - name: Assemble debug
+        run: ./gradlew --no-daemon assembleDebug
+
+      # Release-blocking lint (manifest, resources, gating).
+      - name: Lint (release)
+        run: ./gradlew --no-daemon :app:lintVitalRelease
+
+      # Android 15 requires 16 KB-aligned shared libraries. Verify every LOAD
+      # segment of the engine .so is aligned to at least 2**14 (0x4000).
+      - name: 16 KB native alignment check
+        run: |
+          set -euo pipefail
+          SO=$(find app/build audio-engine/build -name 'libauraltune_audio.so' -path '*arm64-v8a*' | head -1)
+          if [ -z "$SO" ]; then echo "::error::libauraltune_audio.so (arm64-v8a) not found"; exit 1; fi
+          echo "Checking $SO"
+          bad=0
+          # Each LOAD line's last column is the alignment (hex). Require >= 0x4000.
+          while read -r align; do
+            dec=$((align))
+            if [ "$dec" -lt 16384 ]; then echo "::error::LOAD segment alignment $align < 0x4000"; bad=1; fi
+          done < <(readelf -lW "$SO" | awk '/LOAD/ {print $NF}')
+          if [ "$bad" -ne 0 ]; then exit 1; fi
+          echo "OK: all LOAD segments >= 16 KB aligned"

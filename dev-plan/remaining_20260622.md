@@ -1,8 +1,34 @@
 # 남은 작업 정리 (Remaining Backlog)
 
-> 생성: 2026-06-22 · 기준 브랜치: `feat/t2-poc-probe` (G0만 커밋, 이후 미커밋)
+> 생성: 2026-06-22 · 갱신: 2026-06-24
 > 출처: `implement_20260622_110525.md`(Phase 1–7) + `implement_20260617_122721.md`(멀티 프론트엔드 T1/T2/T3) + `implement_20260622_092110.md`(그래픽 EQ)
 > 이 문서는 "무엇이 남았는지"의 단일 인덱스. 실제 착수 시 해당 Phase 문서를 갱신한다.
+
+---
+
+## 🟦 2026-06-24 현재 상태 (정합화)
+
+핵심 사용자 가치는 모두 완료되어 **`main`에 푸시됨**(commit `87079fc`). 이후 추가 완료:
+- ✅ 그래픽 EQ 게인 한계 칩(±6/±12/±15/±20, 불변식 강제) + 프리앰프 마커선 + preamp 적용 시 곡선 평행 하강
+- ✅ AutoEQ ON/OFF **0.5초 선형 wet/dry 크로스페이드**("스르륵") + kill switch **즉시 차단**(4-렌즈 적대적 리뷰: kill 잔존·램프 off-by-one 수정)
+- ✅ recents 빠른선택 스피너(큐레이션 pre-seed), SAF 곡 선택(+ActivityNotFound 가드), 빈상태 문구 분기
+- ✅ UI 재배치: kill switch 상단 / 프로파일+correction·preamp 토글을 그래픽 EQ 위로 묶음
+- ✅ allowBackup=false + `data_extraction_rules.xml`(프라이버시), Compose BOM 2024.09.00(호버 크래시)
+- ✅ 사용자 결정: allowBackup(끄기), 게인범위(칩 선택) — 둘 다 반영
+
+**완료(feat/release-hygiene, 2026-06-24):**
+1. ✅ manual 체인 무조건 enable 버그(AutoEqViewModel) 정정 — applyGraphicEq와 동일 규칙
+2. ✅ CI workflow(`.github/workflows/android.yml`) 신규 + 본 문서 정합화
+3. ✅ 번들 INDEX.md(860KB) 제거(prebuilt seed로 중복, seedIfNeeded는 안전 no-op) + delta 백그라운드 자동체크(24h 쿨다운) + "프로파일 업데이트 확인" 버튼
+4. ✅ Phase 6 T2-OS coverage **조사 완료** → `t2-os-coverage-20260624.md` (결론: 주력 No-go, 폴백 conditional-go; 측정 도구 준비됨, 실기기 측정은 사용자 수행). 본구현 보류 유지.
+
+**🚫 범위 제외 — 2026-06-24 사용자 결정: "외부앱은 고려 대상에서 제외".**
+앱은 **T1(인앱 정확 EQ) 전용**으로 확정. 외부앱/시스템 전역 적용 트랙은 **전부 제외**:
+- **T2-OS**(내장 effect 세션 attach) — coverage 빈약·플랫폼 역풍(`t2-os-coverage-20260624.md`)
+- **T2-Custom / T3(HAL)** + **M0 effect `.so` 분리** — 외부/전역 + 루트 필요 → 불필요
+- 관련 코드는 휴면 보존(삭제 안 함): `app/.../audio/audiofx/*`, `src/debug/.../AudioFxSessionProbe.kt`, PoC 카드. 멀티프론트엔드 계획(`implement_20260617_122721.md`)·coverage 조사는 보관(archived).
+
+**여전히 남음(T1 범위 내, 낮음):** Phase 4b(FTS/migration test/ETag 회귀), query-driven 온라인 검색 fallback, 하이레이트 직접재생(24/32·384k AudioTrack), 프로파일 교체 크로스페이드, release APK analyzer 자동화, 300+ delta full-resync.
 
 ---
 

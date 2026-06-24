@@ -10,6 +10,7 @@ import com.coreline.autoeq.AutoEqApi
 import com.coreline.autoeq.model.AutoEqCatalogEntry
 import com.coreline.autoeq.model.AutoEqProfile
 import com.coreline.autoeq.model.CatalogState
+import com.coreline.autoeq.repository.DeltaResult
 import com.coreline.autoeq.search.AutoEqSearchEngine
 import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
@@ -245,7 +246,12 @@ class AutoEqViewModel(
                     // Kill switch must bypass instantly (no 0.5 s crossfade) to honor the
                     // "no DSP passthrough" guarantee; normal correction toggles crossfade.
                     engine.setAutoEqEnabled(if (killed) false else correction, immediate = killed)
-                    engine.setManualEqEnabled(if (killed) false else true)
+                    // Manual chain: off when killed, otherwise enabled ONLY if there are
+                    // non-flat bands — same rule as applyGraphicEq, so the two owners agree
+                    // (previously this forced manual ON unconditionally).
+                    engine.setManualEqEnabled(
+                        !killed && GraphicEqBands.toSpecs(_bandGains.value).isNotEmpty(),
+                    )
                     engine.setAutoEqPreampEnabled(if (killed) false else preamp)
                 }
         }
@@ -280,6 +286,13 @@ class AutoEqViewModel(
         // 변경 영속화는 더 긴 debounce(400ms)로 DataStore 쓰기 빈도를 낮춘다.
         viewModelScope.launch {
             _bandGains.debounce(400L).collect { gains -> settings.setCurrentGraphicEqGains(gains) }
+        }
+        // 앱 시작 시 백그라운드 delta 체크(쿨다운 DELTA_CHECK_INTERVAL_MS). 변경 있을 때만 알림.
+        viewModelScope.launch {
+            val last = settings.lastDeltaCheckMs.first()
+            if (System.currentTimeMillis() - last > DELTA_CHECK_INTERVAL_MS) {
+                checkProfileUpdates(manual = false)
+            }
         }
         // 최초 1회: 최근 프로파일이 비어 있으면 카탈로그 Loaded 시점에 큐레이션 10개를 pre-seed.
         // 경합 안전: empty-check+write를 settings 내부 store.edit 1트랜잭션으로 처리(사용자 탭과 무손실).
@@ -514,6 +527,33 @@ class AutoEqViewModel(
         }
     }
 
+    /**
+     * Incremental profile update: fetch only what changed upstream (delta sync via the GitHub
+     * compare API) and upsert into the local DB. [manual]=true surfaces every outcome; the
+     * background/auto path stays silent unless something actually changed (avoids startup noise).
+     * Honors the kill switch.
+     */
+    fun checkProfileUpdates(manual: Boolean = true) {
+        viewModelScope.launch {
+            if (killSwitchEngaged.value) {
+                if (manual) _importMessage.value = "Kill switch ON — 업데이트를 건너뜁니다"
+                return@launch
+            }
+            if (manual) _importMessage.value = "프로파일 업데이트 확인 중…"
+            val result = withContext(Dispatchers.IO) { api.repository.syncDelta() }
+            settings.setLastDeltaCheckMs(System.currentTimeMillis())
+            when (result) {
+                is DeltaResult.NoChange ->
+                    if (manual) _importMessage.value = "프로파일이 최신 상태입니다"
+                is DeltaResult.Updated ->
+                    _importMessage.value =
+                        "프로파일 업데이트됨 (변경 ${result.changedProfiles}, 제거 ${result.removedProfiles})"
+                is DeltaResult.Failed ->
+                    if (manual) _importMessage.value = "업데이트 확인 실패: ${result.reason}"
+            }
+        }
+    }
+
     /** Delete a user-imported profile (no-op for fetched profiles). */
     fun deleteImported(id: String) {
         viewModelScope.launch {
@@ -529,6 +569,9 @@ class AutoEqViewModel(
         const val DEBOUNCE_MS = 150L
         const val DIAG_POLL_MS = 1_000L
         private const val SUBSCRIBE_TIMEOUT_MS = 5_000L
+
+        /** Background delta-sync cooldown: auto-check profile updates at most once per 24h. */
+        private const val DELTA_CHECK_INTERVAL_MS = 24L * 60L * 60L * 1_000L
 
         /**
          * 빠른 선택(스피너) 최초 pre-seed용 큐레이션 프로파일 이름.
