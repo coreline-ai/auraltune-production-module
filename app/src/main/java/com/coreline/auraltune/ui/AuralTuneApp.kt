@@ -1,11 +1,17 @@
 // AuralTuneApp.kt
-// Top-level Composable. Wires the AutoEqViewModel into a single-screen Scaffold and hosts
-// the Phase 0 / Phase 6 MVP layout: status card, search section, diagnostics card,
-// test-tone toggle, and AutoEq attribution.
+// Top-level Composable. Bottom-nav 3-tab shell:
+//   ① 플레이어(홈) — full player + queue   ② AutoEQ   ③ OPRA
+// The single playback session (MusicPlayerController) is shared: a docked MINI PLAYER stays
+// visible on the AutoEQ/OPRA tabs while audio plays, and tapping it returns to the Player tab.
+// AutoEQ/OPRA tabs reuse the same correction UI (status · compare · search · graphic EQ · preamp
+// · diagnostics · about), differing only in the search source.
 @file:OptIn(androidx.media3.common.util.UnstableApi::class)
 
 package com.coreline.auraltune.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,31 +22,44 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.foundation.clickable
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -49,6 +68,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,12 +82,16 @@ import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
-import com.coreline.auraltune.audio.MusicPlayerController
+import com.coreline.auraltune.audio.PlaybackUiState
+import com.coreline.auraltune.audio.TrackInfo
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 
+/** Bottom-nav destinations. Player is home. */
+private enum class AppTab { PLAYER, AUTOEQ, OPRA }
+
 /**
- * Top-level AuralTune Composable. Hosts the [AuralTuneTheme] + [Scaffold] and binds the
- * [AutoEqViewModel] for the only screen of the MVP.
+ * Top-level AuralTune Composable. Hosts [AuralTuneTheme] + a bottom-nav [Scaffold] with the docked
+ * mini-player. The [AutoEqViewModel] (owns the shared audio stack) is retained across tab switches.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,16 +99,10 @@ fun AuralTuneApp() {
     AuralTuneTheme {
         val context = LocalContext.current
         val app = context.applicationContext as AuralTuneApplication
-
-        // Phase 2: the ViewModel owns the audio stack (engine / musicController /
-        // deviceManager) and closes it in onCleared(), so it survives rotation. The
-        // Composable no longer creates or disposes any of it.
         val vm: AutoEqViewModel = viewModel(factory = AutoEqViewModelFactory(app))
         val musicController = vm.musicController
 
         val snackbarHostState = remember { SnackbarHostState() }
-
-        // P3-A: surface the latest import message as a one-shot Snackbar.
         val importMsg by vm.importMessage.collectAsState()
         LaunchedEffect(importMsg) {
             val msg = importMsg
@@ -94,305 +112,435 @@ fun AuralTuneApp() {
             }
         }
 
+        var selectedTab by rememberSaveable { mutableStateOf(AppTab.PLAYER) }
+
+        val playback by musicController.state.collectAsState()
+        val opraDetail by vm.opraDetail.collectAsState()
+        val opraSyncState by vm.opraSyncState.collectAsState()
+
+        // 외부 링크(라이선스/측정 출처) 열기 — ActivityNotFound 가드 + Toast.
+        val linkCtx = LocalContext.current
+        val openUrl: (String) -> Unit = { url ->
+            try {
+                linkCtx.startActivity(
+                    android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            } catch (e: android.content.ActivityNotFoundException) {
+                if (BuildConfig.DEBUG) android.util.Log.w("AboutLink", "no browser for $url", e)
+                android.widget.Toast.makeText(
+                    linkCtx, linkCtx.getString(R.string.opra_link_open_failed), android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+
+        // 탭 전환에도 스크롤 위치 보존 — AuralTuneApp 스코프에서 hoist(탭 콘텐츠만 dispose됨).
+        val playerListState = rememberLazyListState()
+        val autoEqListState = rememberLazyListState()
+        val opraListState = rememberLazyListState()
+
+        // OPRA 행 탭 → 상세 시트(어느 탭 위에서도 오버레이).
+        opraDetail?.let { detail ->
+            OpraProfileDetailDialog(
+                profile = detail,
+                onApply = { vm.applyOpraDetail() },
+                onOpenUrl = openUrl,
+                onDismiss = { vm.dismissOpraDetail() },
+            )
+        }
+
         Scaffold(
             topBar = {
-                TopAppBar(title = { Text(stringResource(R.string.app_name)) })
+                TopAppBar(title = {
+                    Text(
+                        when (selectedTab) {
+                            AppTab.PLAYER -> stringResource(R.string.app_name)
+                            AppTab.AUTOEQ -> stringResource(R.string.app_name) + " · AutoEQ"
+                            AppTab.OPRA -> stringResource(R.string.app_name) + " · OPRA"
+                        },
+                    )
+                })
+            },
+            bottomBar = {
+                Column {
+                    // 미니 플레이어: 플레이어 탭 밖 + 재생 세션 존재 시에만 상주. 탭하면 플레이어로 확장.
+                    if (selectedTab != AppTab.PLAYER && playback.hasMedia) {
+                        MiniPlayer(
+                            state = playback,
+                            onPlayPause = musicController::togglePlayPause,
+                            onNext = musicController::next,
+                            onExpand = { selectedTab = AppTab.PLAYER },
+                        )
+                    }
+                    NavigationBar {
+                        NavigationBarItem(
+                            selected = selectedTab == AppTab.PLAYER,
+                            onClick = { selectedTab = AppTab.PLAYER },
+                            icon = { Icon(Icons.Default.LibraryMusic, contentDescription = null) },
+                            label = { Text(stringResource(R.string.tab_player)) },
+                        )
+                        NavigationBarItem(
+                            selected = selectedTab == AppTab.AUTOEQ,
+                            onClick = { selectedTab = AppTab.AUTOEQ },
+                            icon = { Icon(Icons.Default.GraphicEq, contentDescription = null) },
+                            label = { Text("AutoEQ") },
+                        )
+                        NavigationBarItem(
+                            selected = selectedTab == AppTab.OPRA,
+                            onClick = { selectedTab = AppTab.OPRA },
+                            icon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                            label = { Text("OPRA") },
+                        )
+                    }
+                }
             },
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         ) { padding ->
-            AuralTuneScreen(
-                vm = vm,
-                musicController = musicController,
-                contentPadding = padding,
-            )
+            when (selectedTab) {
+                AppTab.PLAYER -> PlayerScreen(vm, playback, padding, playerListState)
+                AppTab.AUTOEQ -> CorrectionScreen(vm, isOpra = false, contentPadding = padding, listState = autoEqListState, openUrl = openUrl, opraSyncState = opraSyncState)
+                AppTab.OPRA -> CorrectionScreen(vm, isOpra = true, contentPadding = padding, listState = opraListState, openUrl = openUrl, opraSyncState = opraSyncState)
+            }
         }
     }
 }
 
+// ── Player tab (home) — full transport + queue ─────────────────────────────────
+
 @Composable
-private fun AuralTuneScreen(
+private fun PlayerScreen(
     vm: AutoEqViewModel,
-    musicController: MusicPlayerController,
+    state: PlaybackUiState,
     contentPadding: PaddingValues,
+    listState: LazyListState,
 ) {
-    val query by vm.query.collectAsState()
-    val results by vm.results.collectAsState()
-    val catalog by vm.catalogState.collectAsState()
-    val selected by vm.selectedProfile.collectAsState()
-    val listenMode by vm.listenMode.collectAsState()
-    // AutoEQ 보정이 실제로 들리는 모드(원음 제외) — EQ 그래프 표시 판단에 사용.
-    val autoEqAudible = listenMode != ListenMode.ORIGINAL
-    val preampEnabled by vm.preampEnabled.collectAsState()
-    val favorites by vm.favoriteIds.collectAsState()
-    val diag by vm.diagnostics.collectAsState()
-    val bandGains by vm.bandGains.collectAsState()
-    val eqPresets by vm.graphicEqPresets.collectAsState()
-    val selectedPresetId by vm.selectedGraphicEqPresetId.collectAsState()
-    val gainLimit by vm.gainLimitDb.collectAsState()
-    val showPreamp by vm.showPreampOnGraph.collectAsState()
-    val recents by vm.recentProfiles.collectAsState()
-    val opraResults by vm.opraResults.collectAsState()
-    val opraQuery by vm.opraQuery.collectAsState()
-    val opraRefreshing by vm.opraRefreshing.collectAsState()
-    val opraSyncState by vm.opraSyncState.collectAsState()
-    val opraDetail by vm.opraDetail.collectAsState()
-    // 0 = AutoEQ 탭(기존), 1 = OPRA 비교 탭. 적용된 보정(상태카드/토글/그래프)은 공유.
-    var selectedSourceTab by remember { mutableStateOf(0) }
-
-    // 외부 링크(라이선스/측정 출처) 열기 — SAF 가드와 동일하게 ActivityNotFound 처리.
-    val linkCtx = LocalContext.current
-    val openUrl: (String) -> Unit = { url ->
-        try {
-            linkCtx.startActivity(
-                android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
-                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        } catch (e: android.content.ActivityNotFoundException) {
-            if (BuildConfig.DEBUG) android.util.Log.w("AboutLink", "no browser for $url", e)
-            android.widget.Toast.makeText(
-                linkCtx,
-                linkCtx.getString(R.string.opra_link_open_failed),
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
-        }
-    }
-
-    // OPRA 행 탭 → 상세 시트(author/source/license + 적용). null이면 닫힘.
-    opraDetail?.let { detail ->
-        OpraProfileDetailDialog(
-            profile = detail,
-            onApply = { vm.applyOpraDetail() },
-            onOpenUrl = openUrl,
-            onDismiss = { vm.dismissOpraDetail() },
-        )
-    }
-
-    // Phase 2 PoC(외부앱 effect-control-session 측정)는 DebugSupport.AudioFxProbeCard 안으로
-    // 완전히 이동했다(src/debug=실제, src/release=no-op). main은 probe를 전혀 참조하지 않는다.
-
-    // 음악 파일 선택 launcher — 본문에서 remember (LazyColumn item 안에 두면
-    // 스크롤로 item이 detach될 때 ActivityResult 콜백이 유실될 수 있음).
-    val audioPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
-    ) { uri ->
-        if (BuildConfig.DEBUG) android.util.Log.i("MusicPlay", "picked uri=$uri")
-        if (uri != null) {
-            musicController.play(uri)
-        }
-    }
+    val musicController = vm.musicController
+    val ctx = LocalContext.current
+    // 멀티 파일 선택 → 큐에 추가(첫 추가면 자동 재생).
+    val picker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments(),
+    ) { uris -> if (!uris.isNullOrEmpty()) musicController.addToQueue(uris) }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(contentPadding),
+        modifier = Modifier.fillMaxSize().padding(contentPadding),
+        state = listState,
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // 로컬 음악 재생 (T1) — launcher는 본문에서 remember됨.
+        // Now-playing + seek + transport.
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // TODO(i18n): 문자열 리소스화
-                val playCtx = LocalContext.current
-                // 항상 SAF 파일 선택기를 띄워 사용자가 곡을 고르고 바꿀 수 있게 한다(debug/release 동일).
-                // SAF 핸들러(DocumentsUI)가 없거나 차단된 일부 기기(전용 DAP 등)에서는 launch()가
-                // ActivityNotFoundException을 던질 수 있어 무반응처럼 보인다 → 가드 + Toast 피드백.
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = if (state.hasMedia) state.title else stringResource(R.string.player_no_media),
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    val dur = state.durationMs
+                    Slider(
+                        value = if (dur > 0) (state.positionMs.toFloat() / dur).coerceIn(0f, 1f) else 0f,
+                        onValueChange = { f -> if (dur > 0) musicController.seekTo((f * dur).toLong()) },
+                        enabled = state.hasMedia && dur > 0,
+                    )
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        Text(formatTime(state.positionMs), style = MaterialTheme.typography.labelSmall)
+                        Spacer(Modifier.weight(1f))
+                        Text(formatTime(state.durationMs), style = MaterialTheme.typography.labelSmall)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = musicController::previous, enabled = state.hasMedia) {
+                            Icon(Icons.Default.SkipPrevious, contentDescription = stringResource(R.string.player_prev))
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        FilledIconButton(
+                            onClick = musicController::togglePlayPause,
+                            enabled = state.hasMedia,
+                            modifier = Modifier.size(64.dp),
+                        ) {
+                            Icon(
+                                if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = stringResource(if (state.isPlaying) R.string.player_pause else R.string.player_play),
+                            )
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        IconButton(onClick = musicController::next, enabled = state.hasMedia) {
+                            Icon(Icons.Default.SkipNext, contentDescription = stringResource(R.string.player_next))
+                        }
+                    }
+                }
+            }
+        }
+
+        // File actions.
+        item {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
                         try {
-                            audioPicker.launch(arrayOf("audio/*"))
+                            picker.launch(arrayOf("audio/*"))
                         } catch (e: android.content.ActivityNotFoundException) {
                             if (BuildConfig.DEBUG) android.util.Log.w("MusicPlay", "no SAF picker", e)
                             android.widget.Toast.makeText(
-                                playCtx,
-                                "이 기기에서 파일 선택기를 열 수 없습니다 (SAF 미지원)",
-                                android.widget.Toast.LENGTH_LONG,
+                                ctx, ctx.getString(R.string.saf_unavailable), android.widget.Toast.LENGTH_LONG,
                             ).show()
                         }
                     },
                     modifier = Modifier.weight(1f),
-                ) { Text("음악 파일 선택") }
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.player_add_files))
+                }
                 OutlinedButton(
-                    onClick = { musicController.stop() },
+                    onClick = { musicController.clearQueue() },
+                    enabled = state.hasMedia,
                     modifier = Modifier.weight(1f),
-                ) { Text("정지") }
-                // 디버그 전용 빠른 재생(자동 테스트용): MediaStore 첫 곡 즉시 재생. release엔 없음.
+                ) { Text(stringResource(R.string.player_clear_queue)) }
+                // 디버그 전용: MediaStore 첫 곡을 큐에 추가(자동 테스트용).
                 if (BuildConfig.DEBUG) {
                     OutlinedButton(onClick = {
-                        DebugSupport.firstPlayableUri(playCtx)?.let { musicController.play(it) }
+                        DebugSupport.firstPlayableUri(ctx)?.let { musicController.addToQueue(listOf(it)) }
                     }) { Text("첫곡") }
                 }
             }
         }
 
-        // 소스 탭: AutoEQ(기존) / OPRA(비교). 적용된 보정 UI(상태/토글/그래프)는 탭 아래 공유.
-        item {
-            TabRow(selectedTabIndex = selectedSourceTab) {
-                Tab(
-                    selected = selectedSourceTab == 0,
-                    onClick = { selectedSourceTab = 0 },
-                    text = { Text("AutoEQ") },
+        // Queue / playlist.
+        if (state.queue.isEmpty()) {
+            item { EmptyStateMessage(stringResource(R.string.player_queue_empty)) }
+        } else {
+            item {
+                Text(
+                    text = stringResource(R.string.player_queue_title, state.queue.size),
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.padding(top = 4.dp),
                 )
-                Tab(
-                    selected = selectedSourceTab == 1,
-                    onClick = { selectedSourceTab = 1 },
-                    text = { Text("OPRA") },
+            }
+            itemsIndexed(state.queue, key = { i, t -> "$i:${t.uri}" }) { index, track ->
+                QueueRow(
+                    track = track,
+                    isCurrent = index == state.currentIndex,
+                    isPlaying = state.isPlaying,
+                    onClick = { musicController.playIndex(index) },
+                    onRemove = { musicController.removeFromQueue(index) },
                 )
             }
         }
+    }
+}
 
-        // 상태 카드 + 비교 모드 — 탭 직후, 검색 결과 목록 위에 배치. 결과가 길어도 핵심(즉시 A/B 비교)이
-        // 아래로 밀리지 않고 항상 상단에 노출되도록(P0).
-        item {
-            StatusCard(
-                profile = selected,
-                onClear = vm::clearProfile,
-            )
+/** One queue row. Current track is highlighted; the X removes it. */
+@Composable
+private fun QueueRow(
+    track: TrackInfo,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = when {
+                isCurrent && isPlaying -> Icons.Default.Pause
+                isCurrent -> Icons.Default.PlayArrow
+                else -> Icons.Default.MusicNote
+            },
+            contentDescription = null,
+            tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = track.title,
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onRemove) {
+            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.player_remove))
         }
-        item {
-            val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
-            val subtitle = when (listenMode) {
-                ListenMode.ORIGINAL -> stringResource(R.string.listen_mode_hint_original)
-                ListenMode.AUTOEQ -> stringResource(R.string.listen_mode_hint_autoeq)
-                ListenMode.USER ->
-                    if (userBands) stringResource(R.string.listen_mode_hint_user)
-                    else stringResource(R.string.listen_mode_hint_user_flat)
+    }
+}
+
+/** Compact mini-player docked above the bottom nav on the AutoEQ/OPRA tabs. Tap to expand. */
+@Composable
+private fun MiniPlayer(
+    state: PlaybackUiState,
+    onPlayPause: () -> Unit,
+    onNext: () -> Unit,
+    onExpand: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onExpand)) {
+        HorizontalDivider()
+        // 진행바(얇게) — durationMs 있을 때만.
+        if (state.durationMs > 0) {
+            val frac = (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
+            Box(modifier = Modifier.fillMaxWidth().height(2.dp)) {
+                Box(modifier = Modifier.fillMaxWidth(frac).height(2.dp))
             }
-            ListenModeBar(
-                mode = listenMode,
-                subtitle = subtitle,
-                onSelect = vm::setListenMode,
-            )
         }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = state.title.ifBlank { stringResource(R.string.player_no_media) },
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = onPlayPause) {
+                Icon(
+                    if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = stringResource(if (state.isPlaying) R.string.player_pause else R.string.player_play),
+                )
+            }
+            IconButton(onClick = onNext) {
+                Icon(Icons.Default.SkipNext, contentDescription = stringResource(R.string.player_next))
+            }
+        }
+    }
+}
 
-        if (selectedSourceTab == 0) {
-        // Search field
-        item {
-            OutlinedTextField(
-                value = query,
-                onValueChange = vm::onQueryChanged,
-                placeholder = { Text(stringResource(R.string.search_placeholder)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { vm.onQueryChanged("") }) {
-                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
+// ── AutoEQ / OPRA correction tab (shared; differs only in the search source) ───────
+
+@Composable
+private fun CorrectionScreen(
+    vm: AutoEqViewModel,
+    isOpra: Boolean,
+    contentPadding: PaddingValues,
+    listState: LazyListState,
+    openUrl: (String) -> Unit,
+    opraSyncState: com.coreline.auraltune.opra.model.OpraSyncState?,
+) {
+    val selected by vm.selectedProfile.collectAsState()
+    val listenMode by vm.listenMode.collectAsState()
+    val autoEqAudible = listenMode != ListenMode.ORIGINAL
+    val preampEnabled by vm.preampEnabled.collectAsState()
+    val bandGains by vm.bandGains.collectAsState()
+    val eqPresets by vm.graphicEqPresets.collectAsState()
+    val selectedPresetId by vm.selectedGraphicEqPresetId.collectAsState()
+    val gainLimit by vm.gainLimitDb.collectAsState()
+    val showPreamp by vm.showPreampOnGraph.collectAsState()
+    val diag by vm.diagnostics.collectAsState()
+
+    // AutoEQ source
+    val query by vm.query.collectAsState()
+    val results by vm.results.collectAsState()
+    val catalog by vm.catalogState.collectAsState()
+    val favorites by vm.favoriteIds.collectAsState()
+    val recents by vm.recentProfiles.collectAsState()
+    // OPRA source
+    val opraResults by vm.opraResults.collectAsState()
+    val opraQuery by vm.opraQuery.collectAsState()
+    val opraRefreshing by vm.opraRefreshing.collectAsState()
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(contentPadding),
+        state = listState,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (!isOpra) {
+            // ── AutoEQ 소스 ──
+            item {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = vm::onQueryChanged,
+                    placeholder = { Text(stringResource(R.string.search_placeholder)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { vm.onQueryChanged("") }) {
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (recents.isNotEmpty()) {
+                item {
+                    var expanded by remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text(selected?.name?.let { "프로파일: $it" } ?: "프로파일 빠른 선택 ▾")
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            recents.forEach { entry ->
+                                DropdownMenuItem(
+                                    text = { Text(entry.name) },
+                                    onClick = { expanded = false; vm.selectProfile(entry) },
+                                )
+                            }
                         }
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-
-        // 최근/빠른 선택 프로파일 스피너 — 이전 선택 10개(최초 1회 큐레이션 pre-seed).
-        if (recents.isNotEmpty()) {
+                }
+            }
             item {
-                var expanded by remember { mutableStateOf(false) }
-                Box(modifier = Modifier.fillMaxWidth()) {
-                    OutlinedButton(
-                        onClick = { expanded = true },
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            text = selected?.name?.let { "프로파일: $it" } ?: "프로파일 빠른 선택 ▾",
-                        )
+                val context = LocalContext.current
+                val importLauncher = rememberLauncherForActivityResult(
+                    contract = ActivityResultContracts.OpenDocument(),
+                ) { uri -> if (uri != null) vm.importFromUri(uri, queryDisplayName(context, uri)) }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
+                        modifier = Modifier.weight(1f),
+                    ) { Text(stringResource(R.string.import_button)) }
+                    OutlinedButton(onClick = vm::clearNetworkCache, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.clear_cache_button))
                     }
-                    DropdownMenu(
-                        expanded = expanded,
-                        onDismissRequest = { expanded = false },
+                }
+            }
+            item {
+                OutlinedButton(onClick = { vm.checkProfileUpdates() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("프로파일 업데이트 확인")
+                }
+            }
+            when (val state = catalog) {
+                CatalogState.Loading -> item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        recents.forEach { entry ->
-                            DropdownMenuItem(
-                                text = { Text(entry.name) },
-                                onClick = {
-                                    expanded = false
-                                    vm.selectProfile(entry)
-                                },
+                        CircularProgressIndicator()
+                        Spacer(Modifier.height(8.dp))
+                        Text(stringResource(R.string.catalog_loading), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                is CatalogState.Error -> item { EmptyStateMessage(state.message) }
+                CatalogState.Idle -> item { EmptyStateMessage(stringResource(R.string.catalog_offline)) }
+                is CatalogState.Loaded -> {
+                    if (results.entries.isEmpty()) {
+                        val emptyMsg = if (query.isBlank()) R.string.search_prompt else R.string.no_results
+                        item { EmptyStateMessage(stringResource(emptyMsg)) }
+                    } else {
+                        items(results.entries, key = { it.id }) { entry ->
+                            CatalogEntryRow(
+                                entry = entry,
+                                isSelected = selected?.id == entry.id,
+                                isFavorite = entry.id in favorites,
+                                onClick = { vm.selectProfile(entry) },
+                                onToggleFavorite = { vm.toggleFavorite(entry.id) },
                             )
                         }
                     }
                 }
             }
-        }
-
-        // P3-A: SAF picker + clear cache.
-        item {
-            val context = LocalContext.current
-            val importLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.OpenDocument(),
-            ) { uri ->
-                if (uri != null) {
-                    val displayName = queryDisplayName(context, uri)
-                    vm.importFromUri(uri, displayName)
-                }
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Button(
-                    onClick = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
-                    modifier = Modifier.weight(1f),
-                ) { Text(stringResource(R.string.import_button)) }
-                OutlinedButton(
-                    onClick = vm::clearNetworkCache,
-                    modifier = Modifier.weight(1f),
-                ) { Text(stringResource(R.string.clear_cache_button)) }
-            }
-        }
-
-        // 프로파일 업데이트(증분 delta) 수동 확인 — 결과는 스낵바로 표시.
-        item {
-            OutlinedButton(
-                onClick = { vm.checkProfileUpdates() },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("프로파일 업데이트 확인") }
-        }
-
-        // Catalog state / results
-        when (val state = catalog) {
-            CatalogState.Loading -> item {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    CircularProgressIndicator()
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        text = stringResource(R.string.catalog_loading),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-            is CatalogState.Error -> item {
-                EmptyStateMessage(state.message)
-            }
-            CatalogState.Idle -> item {
-                EmptyStateMessage(stringResource(R.string.catalog_offline))
-            }
-            is CatalogState.Loaded -> {
-                if (results.entries.isEmpty()) {
-                    // 검색어가 없으면 "결과 없음"이 아니라 검색 안내를 띄운다(카탈로그는 정상 로드됨).
-                    val emptyMsg = if (query.isBlank()) R.string.search_prompt else R.string.no_results
-                    item { EmptyStateMessage(stringResource(emptyMsg)) }
-                } else {
-                    items(results.entries, key = { it.id }) { entry ->
-                        CatalogEntryRow(
-                            entry = entry,
-                            isSelected = selected?.id == entry.id,
-                            isFavorite = entry.id in favorites,
-                            onClick = { vm.selectProfile(entry) },
-                            onToggleFavorite = { vm.toggleFavorite(entry.id) },
-                        )
-                    }
-                }
-            }
-        }
         } else {
-            // ── OPRA 비교 탭 ──
+            // ── OPRA 소스 ──
             item {
                 OutlinedTextField(
                     value = opraQuery,
@@ -426,7 +574,6 @@ private fun AuralTuneScreen(
                 }
             } else {
                 items(opraResults, key = { it.id }) { entry ->
-                    // 행 탭 → 상세 시트(author/source/license + 적용). 적용은 시트의 버튼에서.
                     OpraCatalogRow(
                         entry = entry,
                         isSelected = selected?.id == entry.id,
@@ -434,7 +581,6 @@ private fun AuralTuneScreen(
                     )
                 }
             }
-            // OPRA 탭 라이선스/비제휴 고지(상시 노출). 상세 출처/라이선스는 About 카드 + 상세 시트.
             item {
                 Text(
                     text = stringResource(R.string.opra_tab_footer),
@@ -445,18 +591,28 @@ private fun AuralTuneScreen(
             }
         }
 
-        // 그래픽 EQ (20밴드, Manual chain) — AutoEQ 프로파일과 독립·합성.
+        // ── 공유 보정 영역 ── (선택 프로파일 + 비교 모드를 검색/결과 아래·그래픽 EQ 바로 위에 배치)
+        item { StatusCard(profile = selected, onClear = vm::clearProfile) }
+        item {
+            val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
+            val subtitle = when (listenMode) {
+                ListenMode.ORIGINAL -> stringResource(R.string.listen_mode_hint_original)
+                ListenMode.AUTOEQ -> stringResource(R.string.listen_mode_hint_autoeq)
+                ListenMode.USER ->
+                    if (userBands) stringResource(R.string.listen_mode_hint_user)
+                    else stringResource(R.string.listen_mode_hint_user_flat)
+            }
+            ListenModeBar(mode = listenMode, subtitle = subtitle, onSelect = vm::setListenMode)
+        }
         item {
             GraphicEqCard(
                 bandGains = bandGains,
-                // 그래프엔 보정이 들리는 모드(원음 제외)에서만 AutoEQ 곡선/preamp를 합성(실제 신호와 일치).
                 autoEqFilters = if (autoEqAudible) selected?.filters.orEmpty() else emptyList(),
                 presets = eqPresets,
                 selectedPresetId = selectedPresetId,
                 gainLimitDb = gainLimit,
                 preampDb = if (autoEqAudible) selected?.preampDB ?: 0f else 0f,
                 showPreamp = showPreamp,
-                // 실제 출력 반영: 보정 가청 + preamp 둘 다 켜졌을 때만 곡선을 preampDb만큼 하강.
                 preampApplied = autoEqAudible && preampEnabled,
                 onBandChange = vm::setBandGain,
                 onGainLimitChange = vm::setGainLimit,
@@ -467,17 +623,7 @@ private fun AuralTuneScreen(
                 onDeletePreset = vm::deleteGraphicEqPreset,
             )
         }
-
-        // AutoEQ preamp 토글 — 그래픽 EQ 아래로 이동. (보정 on/off는 비교 모드에서)
-        item {
-            AutoEqPreampCard(
-                preampEnabled = preampEnabled,
-                onTogglePreamp = vm::togglePreamp,
-            )
-        }
-
-        // Diagnostics card (collapsed by default).
-        // P3-C: surface device hash + current sample rate, not just engine counters.
+        item { AutoEqPreampCard(preampEnabled = preampEnabled, onTogglePreamp = vm::togglePreamp) }
         item {
             DiagnosticsCard(
                 diagnostics = diag,
@@ -485,15 +631,9 @@ private fun AuralTuneScreen(
                 deviceHash = vm.currentDeviceHash(),
             )
         }
-
-        // Phase 2 PoC — 외부앱 AudioFx 신호 측정 카드. debug=실제 측정 UI / release=no-op(빈 컴포저블).
-        // BuildConfig.DEBUG로 item 자체를 감싸 release에선 빈 슬롯/간격도 생기지 않게 한다.
         if (BuildConfig.DEBUG) {
             item { DebugSupport.AudioFxProbeCard() }
         }
-
-        // About & licenses — AutoEq + OPRA attribution, CC BY-SA 4.0 link, snapshot commit,
-        // no-endorsement / rights-not-restricted notices (Phase 5, replaces the plain footer).
         item {
             AboutCard(
                 appVersion = BuildConfig.VERSION_NAME,
@@ -503,6 +643,12 @@ private fun AuralTuneScreen(
             )
         }
     }
+}
+
+/** mm:ss formatter for playback times. */
+private fun formatTime(ms: Long): String {
+    val totalSec = (ms / 1000).coerceAtLeast(0)
+    return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }
 
 /** One OPRA catalog row: product + vendor • author + license. Unsupported rows are dimmed/disabled. */
@@ -545,8 +691,7 @@ private fun OpraCatalogRow(
 
 /**
  * Resolve the SAF picker's display name into a human-readable profile name.
- * Falls back to the URI's last path segment when DISPLAY_NAME isn't reported
- * (e.g. some pickers return null cursor for the column).
+ * Falls back to the URI's last path segment when DISPLAY_NAME isn't reported.
  */
 private fun queryDisplayName(context: android.content.Context, uri: android.net.Uri): String {
     return runCatching {

@@ -7,6 +7,22 @@
     <string name="catalog_offline">Offline — using cached catalog</string>
     <string name="catalog_stale_format">Last updated %s ago</string>
 
+    <!-- Bottom navigation -->
+    <string name="tab_player">플레이어</string>
+
+    <!-- Player tab + mini player -->
+    <string name="player_no_media">재생할 파일이 없습니다</string>
+    <string name="player_play">재생</string>
+    <string name="player_pause">일시정지</string>
+    <string name="player_prev">이전 곡</string>
+    <string name="player_next">다음 곡</string>
+    <string name="player_add_files">파일 추가</string>
+    <string name="player_clear_queue">목록 비우기</string>
+    <string name="player_remove">목록에서 제거</string>
+    <string name="player_queue_empty">‘파일 추가’로 음악을 담아보세요</string>
+    <string name="player_queue_title">재생목록 (%1$d)</string>
+    <string name="saf_unavailable">이 기기에서 파일 선택기를 열 수 없습니다 (SAF 미지원)</string>
+
     <!-- Search -->
     <string name="search_placeholder">Search headphones…</string>
     <string name="no_results">No headphones found</string>
