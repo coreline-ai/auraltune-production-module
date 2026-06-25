@@ -49,6 +49,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -68,13 +69,20 @@ import com.coreline.auraltune.opra.model.OpraEqProfile
 fun AuralTunePanel(
     modifier: Modifier = Modifier,
     elevated: Boolean = false,
+    containerColor: Color? = null,
+    borderColor: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.large,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+        colors = CardDefaults.cardColors(
+            containerColor = containerColor ?: MaterialTheme.colorScheme.surfaceContainer,
+        ),
+        border = BorderStroke(
+            1.dp,
+            borderColor ?: MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f),
+        ),
         elevation = CardDefaults.cardElevation(defaultElevation = if (elevated) 6.dp else 0.dp),
     ) {
         Column(content = content)
@@ -113,7 +121,26 @@ fun StatusCard(
     inUse: Boolean = false,
     onUse: (() -> Unit)? = null,
 ) {
-    AuralTunePanel(modifier = modifier, elevated = profile != null) {
+    val canUseByCardTap = profile != null && !inUse && onUse != null
+    val sourceAccent = if (sourceLabel.equals("OPRA", ignoreCase = true)) {
+        MaterialTheme.colorScheme.tertiary
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val cardModifier = modifier.then(
+        if (canUseByCardTap) Modifier.clickable(onClick = onUse!!) else Modifier,
+    )
+
+    AuralTunePanel(
+        modifier = cardModifier,
+        elevated = profile != null,
+        containerColor = if (inUse) {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        } else {
+            null
+        },
+        borderColor = if (inUse) sourceAccent.copy(alpha = 0.55f) else null,
+    ) {
         Column(modifier = Modifier.padding(16.dp)) {
             if (profile == null) {
                 Text(
@@ -138,7 +165,13 @@ fun StatusCard(
                     Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         sourceLabel?.let {
-                            SourceBadge(it)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                SourceBadge(it)
+                                if (inUse) InUseBadge()
+                            }
                             Spacer(Modifier.height(6.dp))
                         }
                         Text(
@@ -163,28 +196,34 @@ fun StatusCard(
                     }
                 }
             }
-            // 탭별 선택 모델: 이 탭 선택이 '현재 사용중'(엔진 적용)이면 표시, 아니면 '지금 사용' 버튼.
-            if (profile != null) {
-                Spacer(Modifier.height(10.dp))
-                if (inUse) {
-                    Surface(
-                        shape = RoundedCornerShape(50),
-                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.18f),
-                        contentColor = MaterialTheme.colorScheme.secondaryContainer,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)),
-                    ) {
-                        Text(
-                            text = "● 현재 사용중",
-                            style = MaterialTheme.typography.labelLarge,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        )
-                    }
-                } else if (onUse != null) {
-                    Button(onClick = onUse, shape = MaterialTheme.shapes.medium) {
-                        Text("지금 사용")
-                    }
-                }
-            }
+        }
+    }
+}
+
+@Composable
+private fun InUseBadge() {
+    val accent = MaterialTheme.colorScheme.secondaryContainer
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = accent.copy(alpha = 0.24f),
+        contentColor = accent,
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.62f)),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+            )
+            Spacer(Modifier.width(5.dp))
+            Text(
+                text = "현재 사용중",
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
     }
 }

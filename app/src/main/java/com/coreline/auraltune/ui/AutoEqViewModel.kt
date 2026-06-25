@@ -62,7 +62,7 @@ class AutoEqViewModel(
     private val engine: AudioEngine = locator.createAudioEngine()
 
     /** Exposed so the screen can drive local music playback (T1). Owned/closed here. */
-    val musicController: MusicPlayerController = MusicPlayerController(app, engine)
+    val musicController: MusicPlayerController = MusicPlayerController(app, engine, settings)
 
     private val deviceManager = com.coreline.auraltune.audio.DeviceAutoEqManager(
         context = app,

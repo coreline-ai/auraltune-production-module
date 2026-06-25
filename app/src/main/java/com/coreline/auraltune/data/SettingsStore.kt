@@ -64,6 +64,18 @@ class SettingsStore(context: Context) {
         store.edit { it[KEY_OPRA_PARSER_VERSION] = version }
     }
 
+    // ----------------- Player: queue + 현재 곡/위치 (재시작 복원) -----------------
+    /** 마지막 큐 + 현재 곡 인덱스/위치. 비어 있으면 null. */
+    val playbackSnapshot: Flow<PlaybackSnapshot?> =
+        store.data.map { prefs -> prefs[KEY_PLAYBACK_SNAPSHOT]?.let { decodePlayback(it) } }
+
+    suspend fun setPlaybackSnapshot(snapshot: PlaybackSnapshot?) {
+        store.edit { prefs ->
+            if (snapshot == null || snapshot.tracks.isEmpty()) prefs.remove(KEY_PLAYBACK_SNAPSHOT)
+            else prefs[KEY_PLAYBACK_SNAPSHOT] = encodePlayback(snapshot)
+        }
+    }
+
     // ----------------- Selected profile -----------------
     val selectedProfileId: Flow<String?> = store.data.map { it[KEY_SELECTED_PROFILE_ID] }
     suspend fun setSelectedProfileId(id: String?) {
@@ -284,6 +296,12 @@ class SettingsStore(context: Context) {
     private fun decodeRecentOpra(raw: String): List<RecentOpraProfile> =
         runCatching { json.decodeFromString(recentOpraSerializer, raw) }.getOrElse { emptyList() }
 
+    private fun encodePlayback(s: PlaybackSnapshot): String =
+        json.encodeToString(PlaybackSnapshot.serializer(), s)
+
+    private fun decodePlayback(raw: String): PlaybackSnapshot? =
+        runCatching { json.decodeFromString(PlaybackSnapshot.serializer(), raw) }.getOrNull()
+
     private fun encodeSelections(map: Map<String, AutoEqSelection>): String =
         json.encodeToString(selectionsSerializer, map)
 
@@ -348,6 +366,7 @@ class SettingsStore(context: Context) {
         private val KEY_RECENT_PROFILES = stringPreferencesKey("recent_profiles_json")
         private val KEY_RECENT_OPRA = stringPreferencesKey("recent_opra_profiles_json")
         private val KEY_OPRA_PARSER_VERSION = intPreferencesKey("opra_parser_version")
+        private val KEY_PLAYBACK_SNAPSHOT = stringPreferencesKey("playback_snapshot_json")
 
         /** Spinner / quick-pick capacity. */
         const val MAX_RECENT = 10

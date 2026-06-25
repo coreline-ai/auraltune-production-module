@@ -25,7 +25,10 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 @UnstableApi
-class AuralTuneAudioProcessor(private val engine: AudioEngine) : BaseAudioProcessor() {
+class AuralTuneAudioProcessor(
+    private val engine: AudioEngine,
+    private val analyzer: SpectrumAnalyzer? = null,
+) : BaseAudioProcessor() {
 
     /** True only for stereo input — the engine's interleaved-stereo contract. */
     private var applyEngine = false
@@ -57,6 +60,7 @@ class AuralTuneAudioProcessor(private val engine: AudioEngine) : BaseAudioProces
         if (applyEngine && engine.sampleRate != inputAudioFormat.sampleRate) {
             engine.updateSampleRate(inputAudioFormat.sampleRate)
         }
+        analyzer?.setSampleRate(inputAudioFormat.sampleRate) // 스펙트럼 주파수 매핑용
 
         // ALWAYS output 16-bit PCM regardless of input encoding. DefaultAudioSink's
         // downstream processors (SilenceSkipping/Sonic) reject PCM_FLOAT, so emitting
@@ -99,6 +103,9 @@ class AuralTuneAudioProcessor(private val engine: AudioEngine) : BaseAudioProces
         if (applyEngine && frames > 0) {
             engine.process(fs, frames) // in-place on base address
         }
+
+        // post-EQ 시각화 탭(RT-safe: 복사만). 절대 인덱스 읽기라 아래 출력 루프의 rewind에 영향 없음.
+        if (frames > 0) analyzer?.feed(fs, frames, channels)
 
         // Always write 16-bit output.
         val out = replaceOutputBuffer(samples * 2)

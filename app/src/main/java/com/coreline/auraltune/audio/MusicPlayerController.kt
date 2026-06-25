@@ -12,6 +12,7 @@
 package com.coreline.auraltune.audio
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
@@ -27,6 +28,9 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.coreline.audio.AudioEngine
 import com.coreline.auraltune.BuildConfig
+import com.coreline.auraltune.data.PlaybackSnapshot
+import com.coreline.auraltune.data.PlaybackTrack
+import com.coreline.auraltune.data.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -35,6 +39,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.io.Closeable
 
@@ -56,11 +61,16 @@ data class PlaybackUiState(
 class MusicPlayerController(
     context: Context,
     engine: AudioEngine,
+    private val settings: SettingsStore,
 ) : Closeable {
 
     private val appContext = context.applicationContext
-    private val processor = AuralTuneAudioProcessor(engine)
+    private val analyzer = SpectrumAnalyzer()
+    private val processor = AuralTuneAudioProcessor(engine, analyzer)
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+
+    /** 재생 중 음원의 실시간 주파수 스펙트럼(밴드 레벨 0..1, post-EQ) — 플레이어 막대 시각화용. */
+    val spectrum: StateFlow<FloatArray> get() = analyzer.spectrum
 
     /** Title source of truth — parallel to ExoPlayer's media-item list (same order/index). */
     private var queue: List<TrackInfo> = emptyList()
@@ -95,10 +105,12 @@ class MusicPlayerController(
                         publish()
                     }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
-                        if (isPlaying) startTicker() else stopTicker()
+                        if (isPlaying) startTicker() else { stopTicker(); saveSnapshot() }
                         publish()
                     }
-                    override fun onMediaItemTransition(item: MediaItem?, reason: Int) = publish()
+                    override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
+                        publish(); saveSnapshot()
+                    }
                     override fun onPositionDiscontinuity(
                         old: Player.PositionInfo,
                         new: Player.PositionInfo,
@@ -108,16 +120,24 @@ class MusicPlayerController(
             }
     }
 
+    init {
+        analyzer.start()
+        // 앱 재시작 시 마지막 큐/현재 곡/위치를 복원(자동 재생 없이 '일시정지'로 노출).
+        restore()
+    }
+
     // ── Queue / transport ──────────────────────────────────────────────────────
 
     /** Replace the queue with [uris] and start playing at [startIndex]. */
     fun setQueueAndPlay(uris: List<Uri>, startIndex: Int = 0) {
         if (uris.isEmpty()) return
+        uris.forEach(::persistRead)
         queue = uris.map { TrackInfo(it, resolveTitle(it)) }
         player.setMediaItems(queue.map(::toMediaItem), startIndex.coerceIn(0, queue.lastIndex), 0L)
         player.prepare()
         player.playWhenReady = true
         publish()
+        saveSnapshot()
     }
 
     /** Back-compat single-file entry point — plays [uri] as a one-item queue. */
@@ -126,6 +146,7 @@ class MusicPlayerController(
     /** Append [uris] to the queue; if nothing is loaded, start playing the first added track. */
     fun addToQueue(uris: List<Uri>) {
         if (uris.isEmpty()) return
+        uris.forEach(::persistRead)
         val wasEmpty = queue.isEmpty()
         val added = uris.map { TrackInfo(it, resolveTitle(it)) }
         queue = queue + added
@@ -135,36 +156,65 @@ class MusicPlayerController(
             player.playWhenReady = true
         }
         publish()
+        saveSnapshot()
     }
 
-    /** Jump to a queue entry and play it. */
+    /**
+     * Jump to a queue entry and play it. Re-[prepare]s first when the player is IDLE — otherwise a
+     * prior decode error, a never-prepared player, or a restored-paused queue leaves the player in
+     * STATE_IDLE where seek + play is silently ignored (the bug: tapping a queue row did nothing).
+     */
     fun playIndex(index: Int) {
         if (index !in queue.indices) return
+        ensurePrepared()
         player.seekTo(index, 0L)
-        player.play()
+        player.playWhenReady = true
         publish()
     }
 
     fun removeFromQueue(index: Int) {
         if (index !in queue.indices) return
+        val removed = queue[index].uri
         player.removeMediaItem(index)
         queue = queue.toMutableList().apply { removeAt(index) }
+        if (queue.none { it.uri == removed }) releaseRead(removed) // 더 안 쓰면 영속 권한 해제
         publish()
+        saveSnapshot()
     }
 
     fun clearQueue() {
+        queue.forEach { releaseRead(it.uri) }
         player.clearMediaItems()
         queue = emptyList()
         publish()
+        saveSnapshot()
     }
 
-    fun next() { if (player.hasNextMediaItem()) player.seekToNextMediaItem(); publish() }
-    fun previous() { player.seekToPreviousMediaItem(); publish() }
-    fun togglePlayPause() { if (player.isPlaying) player.pause() else player.play() }
+    fun next() { if (player.hasNextMediaItem()) { ensurePrepared(); player.seekToNextMediaItem() }; publish() }
+    fun previous() { ensurePrepared(); player.seekToPreviousMediaItem(); publish() }
+    fun togglePlayPause() { if (player.isPlaying) player.pause() else startPlayback() }
     fun pause() = player.pause()
-    fun resume() = player.play()
+    fun resume() = startPlayback()
     fun seekTo(ms: Long) { player.seekTo(ms.coerceAtLeast(0L)); publish() }
     fun stop() { player.stop() }
+
+    /**
+     * 재생 시작/재개. IDLE이면 재prepare, **큐 끝(ENDED)이면 처음(0번 곡 0초)으로 되감아** 다시 재생한다.
+     * (ENDED에서 play()만 호출하면 재생 위치가 끝이라 아무 일도 안 일어나던 문제 수정.)
+     */
+    private fun startPlayback() {
+        when (player.playbackState) {
+            Player.STATE_IDLE -> { player.prepare(); player.playWhenReady = true }
+            Player.STATE_ENDED -> { player.seekTo(0, 0L); player.playWhenReady = true }
+            else -> player.play()
+        }
+        publish()
+    }
+
+    /** IDLE(에러/미prepare/복원직후)면 재생 전에 재prepare — seek+play가 묻히는 문제 방지. */
+    private fun ensurePrepared() {
+        if (player.playbackState == Player.STATE_IDLE) player.prepare()
+    }
 
     val isPlaying: Boolean get() = player.isPlaying
 
@@ -179,8 +229,10 @@ class MusicPlayerController(
     private fun startTicker() {
         if (ticker?.isActive == true) return
         ticker = scope.launch {
+            var tick = 0
             while (true) {
                 publish()
+                if (++tick % SAVE_EVERY_TICKS == 0) saveSnapshot() // 위치 주기 저장(~5s)
                 delay(POSITION_POLL_MS)
             }
         }
@@ -222,8 +274,54 @@ class MusicPlayerController(
         return uri.lastPathSegment?.substringAfterLast('/') ?: "Unknown"
     }
 
+    /** SAF content:// URI에 영속 읽기 권한을 받아 재시작 후에도 읽게 한다(문서 URI만 성공; 그 외 무시). */
+    private fun persistRead(uri: Uri) {
+        runCatching {
+            appContext.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    private fun releaseRead(uri: Uri) {
+        runCatching {
+            appContext.contentResolver.releasePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+    }
+
+    /** 현재 큐 + 현재 곡 인덱스/위치를 저장(재시작 복원용). 빈 큐면 스냅샷 제거. */
+    private fun saveSnapshot() {
+        val q = queue
+        val idx = player.currentMediaItemIndex.coerceAtLeast(0)
+        val pos = player.currentPosition.coerceAtLeast(0L)
+        scope.launch {
+            settings.setPlaybackSnapshot(
+                if (q.isEmpty()) null
+                else PlaybackSnapshot(q.map { PlaybackTrack(it.uri.toString(), it.title) }, idx, pos),
+            )
+        }
+    }
+
+    /** 앱 재시작 시 1회: 저장된 큐/현재 곡/위치 복원. 자동 재생 없이 '일시정지'로 노출(사용자가 재생). */
+    private fun restore() {
+        scope.launch {
+            if (queue.isNotEmpty()) return@launch
+            val snap = settings.playbackSnapshot.first() ?: return@launch
+            if (snap.tracks.isEmpty() || queue.isNotEmpty()) return@launch // suspend 사이 사용자 추가 가드
+            val tracks = snap.tracks.map { TrackInfo(Uri.parse(it.uri), it.title) }
+            queue = tracks
+            player.setMediaItems(
+                tracks.map(::toMediaItem),
+                snap.index.coerceIn(0, tracks.lastIndex),
+                snap.positionMs.coerceAtLeast(0L),
+            )
+            player.prepare()
+            player.playWhenReady = false
+            publish()
+        }
+    }
+
     override fun close() {
         stopTicker()
+        analyzer.close()
         scope.coroutineContext[Job]?.cancel()
         player.release()
     }
@@ -231,5 +329,6 @@ class MusicPlayerController(
     companion object {
         private const val TAG = "MusicPlayer"
         private const val POSITION_POLL_MS = 500L
+        private const val SAVE_EVERY_TICKS = 10 // ~5s마다 위치 저장
     }
 }

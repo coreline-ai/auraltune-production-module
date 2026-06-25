@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
@@ -82,7 +83,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -98,8 +101,7 @@ import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.PlaybackUiState
 import com.coreline.auraltune.audio.TrackInfo
 import com.coreline.auraltune.audio.eq.GraphicEqBands
-import kotlin.math.abs
-import kotlin.math.sin
+import kotlinx.coroutines.flow.StateFlow
 
 /** Bottom-nav destinations. Player is home. */
 private enum class AppTab { PLAYER, AUTOEQ, OPRA }
@@ -284,7 +286,7 @@ private fun PlayerScreen(
         item {
             AuralTunePanel(elevated = true) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    AudioWaveformPreview()
+                    SpectrumVisualizer(musicController.spectrum)
                     Spacer(Modifier.height(16.dp))
                     Text(
                         text = if (state.hasMedia) state.title else stringResource(R.string.player_no_media),
@@ -414,10 +416,11 @@ private fun PlayerScreen(
     }
 }
 
+/** 재생 중 음원의 실시간 주파수 스펙트럼을 막대로 표시(아래→위). post-EQ 실제 값. */
 @Composable
-private fun AudioWaveformPreview(modifier: Modifier = Modifier) {
+private fun SpectrumVisualizer(spectrum: StateFlow<FloatArray>, modifier: Modifier = Modifier) {
+    val levels by spectrum.collectAsState()
     val accent = MaterialTheme.colorScheme.secondaryContainer
-    val rail = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
     val slot = MaterialTheme.colorScheme.surfaceContainerLowest
     Canvas(
         modifier = modifier
@@ -425,28 +428,23 @@ private fun AudioWaveformPreview(modifier: Modifier = Modifier) {
             .height(156.dp)
             .clip(MaterialTheme.shapes.medium)
             .background(slot)
-            .padding(horizontal = 18.dp, vertical = 18.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
     ) {
-        val centerY = size.height / 2f
-        drawLine(
-            color = rail,
-            start = Offset(0f, centerY),
-            end = Offset(size.width, centerY),
-            strokeWidth = 1.5f,
-        )
-        val bars = 72
-        for (i in 0 until bars) {
-            val t = i.toFloat() / (bars - 1)
-            val x = size.width * t
-            val envelope = 0.35f + 0.65f * sin(t * Math.PI).toFloat()
-            val wave = abs(sin(i * 0.41f) + 0.45f * sin(i * 0.93f))
-            val amp = (size.height * (0.08f + 0.30f * wave * envelope)).coerceAtMost(size.height * 0.43f)
-            val alpha = 0.34f + 0.50f * envelope
-            drawLine(
-                color = accent.copy(alpha = alpha),
-                start = Offset(x, centerY - amp),
-                end = Offset(x, centerY + amp),
-                strokeWidth = 2f,
+        val n = levels.size
+        if (n == 0) return@Canvas
+        val gap = 3.dp.toPx()
+        val barW = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1f)
+        val minH = 2.dp.toPx()
+        val radius = CornerRadius(barW / 2f, barW / 2f)
+        for (i in 0 until n) {
+            val lvl = levels[i].coerceIn(0f, 1f)
+            val h = (size.height * lvl).coerceIn(minH, size.height)
+            val x = i * (barW + gap)
+            drawRoundRect(
+                color = accent.copy(alpha = 0.40f + 0.60f * lvl),
+                topLeft = Offset(x, size.height - h),
+                size = Size(barW, h),
+                cornerRadius = radius,
             )
         }
     }
@@ -592,6 +590,43 @@ private fun sourceOutlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
 )
 
 @Composable
+private fun ProfilePickerButtonContent(
+    title: String,
+    selectedName: String?,
+    placeholder: String,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            )
+            Text(
+                text = selectedName ?: placeholder,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selectedName != null) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Spacer(Modifier.width(10.dp))
+        Icon(
+            imageVector = Icons.Default.ExpandMore,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondaryContainer,
+        )
+    }
+}
+
+@Composable
 private fun CorrectionScreen(
     vm: AutoEqViewModel,
     isOpra: Boolean,
@@ -662,10 +697,18 @@ private fun CorrectionScreen(
                             onClick = { expanded = true },
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.medium,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+                            border = BorderStroke(
+                                1.dp,
+                                if (selected != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.54f)
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f),
+                            ),
                             colors = sourceOutlinedButtonColors(),
                         ) {
-                            Text(selected?.name?.let { "프로파일: $it" } ?: "프로파일 빠른 선택 ▾")
+                            ProfilePickerButtonContent(
+                                title = "프로파일 선택",
+                                selectedName = selected?.name,
+                                placeholder = "최근 프로파일에서 선택",
+                            )
                         }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             recents.forEach { entry ->
@@ -781,10 +824,18 @@ private fun CorrectionScreen(
                             onClick = { expanded = true },
                             modifier = Modifier.fillMaxWidth(),
                             shape = MaterialTheme.shapes.medium,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+                            border = BorderStroke(
+                                1.dp,
+                                if (selectedOpra != null) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.54f)
+                                else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f),
+                            ),
                             colors = sourceOutlinedButtonColors(),
                         ) {
-                            Text(selectedOpra?.name?.let { "프로파일: $it" } ?: "OPRA 빠른 선택 ▾")
+                            ProfilePickerButtonContent(
+                                title = "OPRA 프로파일 선택",
+                                selectedName = selectedOpra?.name,
+                                placeholder = "최근 OPRA 프로파일에서 선택",
+                            )
                         }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                             recentOpra.forEach { recent ->

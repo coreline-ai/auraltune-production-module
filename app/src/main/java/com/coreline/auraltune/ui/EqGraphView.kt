@@ -26,12 +26,14 @@ import com.coreline.auraltune.audio.eq.BiquadSpec
 import com.coreline.auraltune.audio.eq.BiquadType
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 import com.coreline.autoeq.model.AutoEqFilter
+import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.log10
 import kotlin.math.pow
 
 private const val MIN_HZ = 20.0
 private const val MAX_HZ = 20_000.0
-private const val MAX_DB = 15.0          // y-axis half-range (±15 dB)
+private const val MIN_GRAPH_DB = 15.0    // minimum y-axis half-range (±15 dB)
 private const val SAMPLE_RATE = 48_000.0
 private const val CURVE_POINTS = 180
 
@@ -80,6 +82,18 @@ fun EqGraphView(
     val autoCurve = remember(autoSpecs) {
         if (autoSpecs.isEmpty()) null else BiquadResponse.compositeDb(freqs, autoSpecs, SAMPLE_RATE)
     }
+    val curveShift = if (preampApplied) preampDb.toDouble() else 0.0
+    val graphMaxDb = remember(composite, autoCurve, preampDb, showPreamp, curveShift) {
+        val compositeMax = composite.maxOfOrNull { abs(it + curveShift) } ?: 0.0
+        val autoMax = autoCurve?.maxOfOrNull { abs(it + curveShift) } ?: 0.0
+        val preampMax = if (showPreamp) abs(preampDb.toDouble()) else 0.0
+        val curveMax = maxOf(compositeMax, autoMax, preampMax)
+        maxOf(MIN_GRAPH_DB, ceil((curveMax + 1.5) / 5.0) * 5.0)
+    }
+    val gridDbValues = remember(graphMaxDb) {
+        val max = graphMaxDb.toInt()
+        (-max..max step 5).filter { it != 0 }.map { it.toDouble() }
+    }
 
     val colorScheme = MaterialTheme.colorScheme
     val graphBackground = colorScheme.surfaceContainerLowest
@@ -92,15 +106,15 @@ fun EqGraphView(
     Canvas(
         modifier = modifier
             .fillMaxWidth()
-            .height(160.dp)
+            .height(220.dp)
             .padding(horizontal = 4.dp),
     ) {
         val w = size.width
         val h = size.height
         val leftPad = 8f
         val rightPad = 8f
-        val topPad = 16f
-        val bottomPad = 16f
+        val topPad = 18f
+        val bottomPad = 18f
         val plotLeft = leftPad
         val plotRight = (w - rightPad).coerceAtLeast(plotLeft + 1f)
         val plotTop = topPad
@@ -115,8 +129,8 @@ fun EqGraphView(
             return plotLeft + (t * plotWidth).toFloat()
         }
         fun yOf(db: Double): Float {
-            val clamped = db.coerceIn(-MAX_DB, MAX_DB)
-            return plotTop + (plotHeight * (0.5 - clamped / (2 * MAX_DB))).toFloat()
+            val clamped = db.coerceIn(-graphMaxDb, graphMaxDb)
+            return plotTop + (plotHeight * (0.5 - clamped / (2 * graphMaxDb))).toFloat()
         }
 
         // Vertical grid at decade marks (100, 1k, 10k) + octave-ish helpers.
@@ -125,7 +139,7 @@ fun EqGraphView(
             drawLine(gridColor, Offset(x, plotTop), Offset(x, plotBottom), strokeWidth = 1f)
         }
         // Horizontal dB grid lines every 5 dB.
-        for (db in listOf(-15.0, -10.0, -5.0, 5.0, 10.0, 15.0)) {
+        for (db in gridDbValues) {
             val y = yOf(db)
             drawLine(gridColor, Offset(plotLeft, y), Offset(plotRight, y), strokeWidth = 1f)
         }
@@ -147,7 +161,6 @@ fun EqGraphView(
         // When the preamp is actually applied, the entire output is attenuated by
         // preampDb (frequency-independent) → shift the curves DOWN in parallel so
         // the graph matches what is heard (flat regions settle onto the preamp line).
-        val curveShift = if (preampApplied) preampDb.toDouble() else 0.0
         fun yOfShifted(db: Double): Float = yOf(db + curveShift)
 
         // AutoEQ-only curve (dashed) when a profile is active.

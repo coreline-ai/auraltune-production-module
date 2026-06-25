@@ -3,24 +3,31 @@
 // Each slider drives one Manual-chain band via AutoEqViewModel.setBandGain.
 package com.coreline.auraltune.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Save
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,6 +45,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.coreline.auraltune.audio.eq.GraphicEqBands
@@ -72,37 +81,55 @@ fun GraphicEqCard(
                 // TODO(i18n): 문자열 리소스화
                 Text(
                     "그래픽 EQ (20밴드)",
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.titleMedium,
                 )
-                TextButton(onClick = onReset) { Text("리셋") }
             }
-
-            // 게인 한계(리미터) 세그먼트 칩: ±6/±12/±15/±20 중 선택.
-            // 최근접 옵션을 선택 표시 — 어떤 경로로든 정확히 1개만 선택됨(스냅 미보장 값에도 견고).
-            val selectedLimit = GraphicEqBands.GAIN_LIMIT_OPTIONS
-                .minByOrNull { kotlin.math.abs(it - gainLimitDb) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("한계", style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.width(8.dp))
-                for (opt in GraphicEqBands.GAIN_LIMIT_OPTIONS) {
-                    FilterChip(
-                        selected = opt == selectedLimit,
-                        onClick = { onGainLimitChange(opt) },
-                        label = { Text("±${opt.toInt()}") },
-                    )
-                    Spacer(Modifier.width(6.dp))
-                }
-            }
+            Spacer(Modifier.height(8.dp))
 
             // 프리셋 행: 저장 + 불러오기 메뉴(현재 선택 표시).
             val selectedName = presets.firstOrNull { it.id == selectedPresetId }?.name
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                OutlinedButton(onClick = { showSaveDialog = true }) { Text("프리셋 저장") }
-                Spacer(Modifier.width(8.dp))
-                Box {
-                    TextButton(onClick = { presetMenuOpen = true }) {
-                        Text(selectedName ?: "프리셋 불러오기 (${presets.size})")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = { showSaveDialog = true },
+                    modifier = Modifier.weight(1f).height(40.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = eqSaveButtonColors(),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Save,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("저장", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Box(modifier = Modifier.weight(1f)) {
+                    OutlinedButton(
+                        onClick = { presetMenuOpen = true },
+                        modifier = Modifier.fillMaxWidth().height(40.dp),
+                        shape = MaterialTheme.shapes.medium,
+                        border = eqButtonBorder(selected = selectedName != null),
+                        colors = if (selectedName != null) eqSelectedButtonColors() else eqOutlinedButtonColors(),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            selectedName ?: "불러오기 (${presets.size})",
+                            modifier = Modifier.weight(1f, fill = false),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
                     }
                     DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
                         if (presets.isEmpty()) {
@@ -128,7 +155,7 @@ fun GraphicEqCard(
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(10.dp))
             // 상단: 합성 응답 그래프(Manual + AutoEQ) + preamp 기준선(점선).
             EqGraphView(
                 bandGains = bandGains,
@@ -139,7 +166,11 @@ fun GraphicEqCard(
             )
             // 프리앰프 표시 토글(주황 점선). 활성 프로파일 preamp가 있을 때만 의미 있어 그 외엔 비활성.
             val hasPreamp = kotlin.math.abs(preampDb) > 0.05f
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Checkbox(
                     checked = showPreamp,
                     onCheckedChange = onToggleShowPreamp,
@@ -152,10 +183,12 @@ fun GraphicEqCard(
                 Text(
                     if (hasPreamp) "프리앰프 표시 (${String.format("%+.1f", preampDb)} dB)"
                     else "프리앰프 표시 (프로파일 없음)",
+                    modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                 )
+                EqResetButton(onClick = onReset)
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -171,9 +204,121 @@ fun GraphicEqCard(
                     )
                 }
             }
+            Spacer(Modifier.height(10.dp))
+            GainLimitSelector(
+                gainLimitDb = gainLimitDb,
+                onGainLimitChange = onGainLimitChange,
+            )
         }
     }
 }
+
+@Composable
+private fun EqResetButton(onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.height(34.dp),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.70f)),
+        colors = eqResetButtonColors(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+    ) {
+        Text(
+            text = "리셋",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+@Composable
+private fun GainLimitButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(38.dp),
+        shape = MaterialTheme.shapes.small,
+        border = eqButtonBorder(selected),
+        colors = if (selected) eqSelectedButtonColors() else eqOutlinedButtonColors(),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+    ) {
+        Text(
+            text = label,
+            style = if (selected) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+        )
+    }
+}
+
+@Composable
+private fun GainLimitSelector(
+    gainLimitDb: Float,
+    onGainLimitChange: (Float) -> Unit,
+) {
+    val selectedLimit = GraphicEqBands.GAIN_LIMIT_OPTIONS
+        .minByOrNull { kotlin.math.abs(it - gainLimitDb) }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            "EQ 한계",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (opt in GraphicEqBands.GAIN_LIMIT_OPTIONS) {
+                GainLimitButton(
+                    label = "±${opt.toInt()} dB",
+                    selected = opt == selectedLimit,
+                    onClick = { onGainLimitChange(opt) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun eqButtonBorder(selected: Boolean) = BorderStroke(
+    width = if (selected) 2.dp else 1.dp,
+    color = if (selected) {
+        MaterialTheme.colorScheme.secondaryContainer
+    } else {
+        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f)
+    },
+)
+
+@Composable
+private fun eqSelectedButtonColors() = ButtonDefaults.outlinedButtonColors(
+    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+)
+
+@Composable
+private fun eqSaveButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+)
+
+@Composable
+private fun eqResetButtonColors() = ButtonDefaults.outlinedButtonColors(
+    containerColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.12f),
+    contentColor = MaterialTheme.colorScheme.tertiary,
+)
+
+@Composable
+private fun eqOutlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
+    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+)
 
 @Composable
 private fun SavePresetDialog(
