@@ -13,7 +13,7 @@
 [![NDK](https://img.shields.io/badge/NDK-r27.0.12077973-blue?style=flat-square)](#-build-matrix)
 [![16KB pages](https://img.shields.io/badge/16KB%20pages-✓-orange?style=flat-square)](#-correctness-invariants)
 
-[![Tests](https://img.shields.io/badge/Kotlin%20unit-180%20PASS-brightgreen?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/Kotlin%20unit-213%20PASS-brightgreen?style=flat-square)](#-testing)
 [![Native tests](https://img.shields.io/badge/native%20suites-7%20PASS-brightgreen?style=flat-square)](#-testing)
 [![DSP parity](https://img.shields.io/badge/scipy.lfilter%20SNR-140--157%20dB-success?style=flat-square)](#-correctness-invariants)
 [![TSan](https://img.shields.io/badge/ThreadSanitizer-clean-success?style=flat-square)](#-correctness-invariants)
@@ -32,7 +32,8 @@ DSP-accurate biquad cascade · RT-safe atomic publish · Source-level integratio
 - 🎯 **DSP parity verified** — scipy.lfilter SNR 140–157 dB across 44.1k / 48k / 96k; freqz match to 0.0000 dB worst-case.
 - 🛡️ **TSan-clean atomic publish** — heap `EngineSnapshot` + 500 ms deferred retire closes the audio-thread / control-thread race surface end-to-end.
 - ⚡ **Zero-allocation audio callback** — single `acquire` load per buffer, no locks, no Java callbacks across the JNI boundary.
-- 🧪 **180 Kotlin unit (71 engine / 96 data / 13 app) + 6 native suites** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
+- 🧪 **213 Kotlin unit (71 engine / 96 autoeq-data / 25 opra-data / 21 app) + 8 native suites** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
+- 🆚 **OPRA comparison + A/B/C listen modes** — second data source (OPRA, CC BY-SA 4.0) bundled offline alongside AutoEq, sharing the same DSP engine; one-tap 원음 / AutoEQ / 내 설정 (profile + graphic EQ) for instant A-B-C auditioning.
 - 🧱 **3-layer range validation** — Kotlin `require` → JNI guard → engine bounds-check; cross-language status code surfaces drift as `IllegalStateException`.
 - 🔌 **Source-level integration ready** — `AudioEngine.Builder` enforces sample-rate match, `useInAudioSession` DSL enforces lifecycle, deprecated aliases preserved for downstream binary compat.
 - 📦 **16 KB page-size compatible** — `-Wl,-z,max-page-size=16384` linker flag, verified post-link via `llvm-readelf -l` (`Align 0x4000`).
@@ -61,6 +62,15 @@ auraltune-production-module/
 │   ├── cache/                Legacy file caches (one-shot migration sources only)
 │   └── src/main/assets/autoeq/INDEX.md     Bundled offline seed (851 KB snapshot)
 │
+├── opra-data/               # :opra-data — OPRA (Open Profiles for Revealing Audio) data layer
+│   ├── model/                OpraModel + OpraFilterType (engine-supported-filter check)
+│   ├── dto/                  database_v1.jsonl line DTOs + bundled manifest DTO
+│   ├── db/                   Room: OpraDatabase + DAO/Store (separate opra_catalog.db)
+│   ├── OpraJsonlParser       Streaming JSONL parser (vendor/product/eq join, orphan/malformed)
+│   ├── *SnapshotSource       Bundled(release, sha256-verified) / GitHubRaw(debug) sources
+│   └── src/main/assets/opra/database_v1.jsonl.gz + manifest.json  (bundled snapshot, ~1.1 MB gz)
+│   # Depends ONLY on :audio-engine (NOT :autoeq-data); OpraEqProfile→engine adapter lives in :app
+│
 └── app/                      # :app — Compose UI + ExoPlayer (Media3) T1 pipeline
     ├── audio/                MusicPlayerController + AuralTuneAudioProcessor (engine.process),
     │                         DeviceAutoEqManager (single engine writer), audiofx/ (T2 probe)
@@ -75,23 +85,23 @@ auraltune-production-module/
 **Module dependencies (compile-time graph):**
 
 ```
-        ┌──────────┐
-        │  :app    │  Compose UI · ExoPlayer(Media3) · DI
-        └────┬─────┘
-             │ implementation(project(...))
-       ┌─────┴─────┐
-       ▼           ▼
- ┌──────────┐ ┌──────────────┐
- │:audio-   │ │:autoeq-data  │  Pure Kotlin: parser/cache/repo/search
- │ engine   │ └──────────────┘
- │ (JNI/    │      │
- │  native) │      │ implementation libs.okhttp (api'd)
+              ┌──────────┐
+              │  :app    │  Compose UI · ExoPlayer(Media3) · DI · OpraEqProfile→engine adapter
+              └────┬─────┘
+                   │ implementation(project(...))
+       ┌───────────┼───────────────┐
+       ▼           ▼               ▼
+ ┌──────────┐ ┌──────────────┐ ┌──────────────┐
+ │:audio-   │ │:autoeq-data  │ │ :opra-data   │  OPRA fetch/parse/cache/search
+ │ engine   │ └──────────────┘ └──────┬───────┘  (CC BY-SA 4.0 data, bundled snapshot)
+ │ (JNI/    │      │                  │ api(project(":audio-engine"))  ← NOT :autoeq-data
+ │  native) │◄─────┘──────────────────┘ implementation libs.okhttp / room
  └──────────┘      │
                    ▼
-                OkHttp 4.12
+                OkHttp 4.12 · Room
 ```
 
-`:audio-engine` and `:autoeq-data` are **independent of `:app`** and can be vendored / source-included into other host apps.
+`:audio-engine`, `:autoeq-data`, and `:opra-data` are **independent of `:app`** and can be vendored / source-included. `:opra-data` is fully isolated from `:autoeq-data` (a separate data source for the same shared engine); the OPRA→engine adapter is the only bridge and lives in `:app`.
 
 ---
 
@@ -136,8 +146,8 @@ adb shell am start -n com.coreline.auraltune/.MainActivity
 ### Run all unit tests
 
 ```bash
-./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :app:testDebugUnitTest
-# Expected: 180 tests, all PASS (71 engine / 96 data / 13 app)
+./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :opra-data:testDebugUnitTest :app:testDebugUnitTest
+# Expected: 213 tests, all PASS (71 engine / 96 autoeq-data / 25 opra-data / 21 app)
 ```
 
 ### Run native unit tests (host JVM)
@@ -234,7 +244,8 @@ repo.close()                              // cancels all inflight HTTP work
 |---|---|---|---|
 | `:audio-engine` Kotlin unit | **71** | Robolectric + ShadowAudioEngine | API contracts, lifecycle DSL, builder, range gates, native-create failure, native-update rejection |
 | `:autoeq-data` Kotlin unit | **96** | Robolectric + OkHttp interceptor + in-memory Room | Parsers, caches, DB-first repo (catalog seed, tombstone sweep, profile DB hit/miss/kill-switch, coalescing), search |
-| `:app` Kotlin unit | **13** | JUnit | Graphic-EQ freqz (BiquadResponse) + T2-OS approximation fit (AutoEqApprox) |
+| `:opra-data` Kotlin unit | **25** | Robolectric + in-memory Room | OPRA JSONL parser (join/orphan/malformed), filter-type→engine mapping, Room store, repository (NoChange/Updated/Failed + checksum-mismatch/offline cache-retention), bundled sha256 source + gz-fallback |
+| `:app` Kotlin unit | **21** | Robolectric + JUnit | Graphic-EQ freqz (BiquadResponse) + T2-OS approximation fit (AutoEqApprox) + OpraEngineAdapter + SettingsStore provider-migration + OpraSourcePolicy (release≠GitHub) |
 | `:app` instrumented | (on-device) | 3 devices (S25 / PD20 / SP4000T) | End-to-end audio path, rotation, offline DB |
 | Native — `AuralTuneEQEngineTest` | 8 | host g++ | Engine: NaN guard, sample-rate change, validation, snapshot publish, xrun, enable toggle, rapid switching click-free |
 | Native — `RangeValidationTest` | 8 | host g++ | Native-side range bounds, `process()` size validation, applied-snapshot consistency |
@@ -250,8 +261,8 @@ repo.close()                              // cancels all inflight HTTP work
 ### Single command — full unit suite
 
 ```bash
-./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest \
-          :audio-engine:lintDebug :autoeq-data:lintDebug \
+./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :opra-data:testDebugUnitTest \
+          :audio-engine:lintDebug :autoeq-data:lintDebug :opra-data:lintDebug \
           :app:assembleDebug :app:assembleRelease
 ```
 
@@ -422,7 +433,8 @@ For teams source-vendoring `:audio-engine` and / or `:autoeq-data`:
 
 ### Third-party attribution
 
-Headphone correction profiles courtesy of Jaakko Pasanen's [AutoEq project](https://github.com/jaakkopasanen/AutoEq) (MIT License).
+- **AutoEq** — headphone correction profiles courtesy of Jaakko Pasanen's [AutoEq project](https://github.com/jaakkopasanen/AutoEq) (MIT License).
+- **OPRA** — headphone & EQ data from [OPRA (Open Profiles for Revealing Audio)](https://github.com/opra-project/OPRA), a community database started by Roon Labs. OPRA data is licensed under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). AuralTune bundles a versioned snapshot, uses the values as published (format-converted for playback only, OPRA-derived), and is **not endorsed by or affiliated with** OPRA contributors or Roon Labs. In-app attribution/notices live in the *About & licenses* card, the OPRA profile detail sheet, and the OPRA-tab footer.
 
 ---
 

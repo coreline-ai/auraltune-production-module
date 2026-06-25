@@ -204,6 +204,9 @@ jobs:
       - name: Kotlin unit tests (:autoeq-data)
         run: ./gradlew :autoeq-data:testDebugUnitTest
 
+      - name: Kotlin unit tests (:opra-data)
+        run: ./gradlew :opra-data:testDebugUnitTest
+
       - name: Kotlin unit tests (:audio-engine, :app)
         run: ./gradlew :audio-engine:testDebugUnitTest :app:testDebugUnitTest
 
@@ -213,7 +216,9 @@ jobs:
       - name: Assemble debug APK
         run: ./gradlew :app:assembleDebug
 
+      # Generous step timeout so the ~2 min release build is never flagged as a flaky timeout.
       - name: Assemble release APK (R8 / minify)
+        timeout-minutes: 15
         run: ./gradlew :app:assembleRelease
 
       # ────────────────────────────────────────────────────────────────────────

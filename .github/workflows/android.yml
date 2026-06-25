@@ -37,11 +37,13 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # Pure-JVM tests across all modules (DSP mirror, catalog/DB, repository, delta sync, app VM).
+      # Pure-JVM tests across all modules (DSP mirror, catalog/DB, repository, delta sync,
+      # OPRA parse/store/checksum/source-policy, app VM).
       - name: Unit tests
         run: ./gradlew --no-daemon
           :audio-engine:testDebugUnitTest
           :autoeq-data:testDebugUnitTest
+          :opra-data:testDebugUnitTest
           :app:testDebugUnitTest
 
       # Compiles all native ABIs + Kotlin; packages the debug APK (incl. prebuilt seed asset).
@@ -51,6 +53,12 @@ jobs:
       # Release-blocking lint (manifest, resources, gating).
       - name: Lint (release)
         run: ./gradlew --no-daemon :app:lintVitalRelease
+
+      # Release gate: R8/minify + resource shrink + bundled OPRA snapshot must build.
+      # Generous step timeout so the ~2 min release build is never flagged as a flaky timeout.
+      - name: Assemble release (R8 / minify)
+        timeout-minutes: 15
+        run: ./gradlew --no-daemon :app:assembleRelease
 
       # Android 15 requires 16 KB-aligned shared libraries. Verify every LOAD
       # segment of the engine .so is aligned to at least 2**14 (0x4000).
