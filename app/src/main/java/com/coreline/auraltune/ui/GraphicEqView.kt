@@ -16,8 +16,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -25,6 +25,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -65,7 +66,7 @@ fun GraphicEqCard(
     var showSaveDialog by remember { mutableStateOf(false) }
     var presetMenuOpen by remember { mutableStateOf(false) }
 
-    Card(modifier = modifier.fillMaxWidth()) {
+    AuralTunePanel(modifier = modifier, elevated = true) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // TODO(i18n): 문자열 리소스화
@@ -127,7 +128,7 @@ fun GraphicEqCard(
                 )
             }
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(14.dp))
             // 상단: 합성 응답 그래프(Manual + AutoEQ) + preamp 기준선(점선).
             EqGraphView(
                 bandGains = bandGains,
@@ -139,7 +140,15 @@ fun GraphicEqCard(
             // 프리앰프 표시 토글(주황 점선). 활성 프로파일 preamp가 있을 때만 의미 있어 그 외엔 비활성.
             val hasPreamp = kotlin.math.abs(preampDb) > 0.05f
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = showPreamp, onCheckedChange = onToggleShowPreamp, enabled = hasPreamp)
+                Checkbox(
+                    checked = showPreamp,
+                    onCheckedChange = onToggleShowPreamp,
+                    enabled = hasPreamp,
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = MaterialTheme.colorScheme.secondaryContainer,
+                        checkmarkColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    ),
+                )
                 Text(
                     if (hasPreamp) "프리앰프 표시 (${String.format("%+.1f", preampDb)} dB)"
                     else "프리앰프 표시 (프로파일 없음)",
@@ -219,6 +228,11 @@ private fun VerticalEqBand(
                 value = gainDb,
                 onValueChange = onChange,
                 valueRange = -gainLimitDb..gainLimitDb,
+                colors = SliderDefaults.colors(
+                    thumbColor = MaterialTheme.colorScheme.secondaryContainer,
+                    activeTrackColor = MaterialTheme.colorScheme.secondaryContainer,
+                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ),
                 modifier = Modifier
                     .graphicsLayer {
                         rotationZ = 270f

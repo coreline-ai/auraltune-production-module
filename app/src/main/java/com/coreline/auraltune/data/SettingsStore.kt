@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -52,6 +53,15 @@ class SettingsStore(context: Context) {
         store.edit { prefs ->
             if (id == null) prefs.remove(KEY_ACTIVE_OPRA_ID) else prefs[KEY_ACTIVE_OPRA_ID] = id
         }
+    }
+
+    /**
+     * 마지막으로 OPRA 데이터를 import한 파서 버전. 앱의 현재 파서 버전보다 낮으면 init에서 1회 강제
+     * 재파싱(파서/매핑 수정을 기존 설치본에 전파)한 뒤 갱신한다. 미설정(0)도 갱신 대상.
+     */
+    val opraParserVersion: Flow<Int> = store.data.map { it[KEY_OPRA_PARSER_VERSION] ?: 0 }
+    suspend fun setOpraParserVersion(version: Int) {
+        store.edit { it[KEY_OPRA_PARSER_VERSION] = version }
     }
 
     // ----------------- Selected profile -----------------
@@ -247,12 +257,32 @@ class SettingsStore(context: Context) {
         return seeded
     }
 
+    // ----------------- Recent / quick-pick OPRA profiles (별도 기록, 최대 [MAX_RECENT]) -----------------
+    /** 최근 선택한 OPRA 프로파일(id+이름), 최근순. */
+    val recentOpraProfiles: Flow<List<RecentOpraProfile>> =
+        store.data.map { prefs -> prefs[KEY_RECENT_OPRA]?.let { decodeRecentOpra(it) } ?: emptyList() }
+
+    /** Prepend (dedup by id), cap at [MAX_RECENT]. */
+    suspend fun addRecentOpraProfile(id: String, name: String) {
+        store.edit { prefs ->
+            val cur = prefs[KEY_RECENT_OPRA]?.let { decodeRecentOpra(it) }.orEmpty()
+            val updated = (listOf(RecentOpraProfile(id, name)) + cur.filter { it.id != id }).take(MAX_RECENT)
+            prefs[KEY_RECENT_OPRA] = encodeRecentOpra(updated)
+        }
+    }
+
     // ----------------- Internals -----------------
     private fun encodeRecents(list: List<AutoEqCatalogEntry>): String =
         json.encodeToString(recentsSerializer, list)
 
     private fun decodeRecents(raw: String): List<AutoEqCatalogEntry> =
         runCatching { json.decodeFromString(recentsSerializer, raw) }.getOrElse { emptyList() }
+
+    private fun encodeRecentOpra(list: List<RecentOpraProfile>): String =
+        json.encodeToString(recentOpraSerializer, list)
+
+    private fun decodeRecentOpra(raw: String): List<RecentOpraProfile> =
+        runCatching { json.decodeFromString(recentOpraSerializer, raw) }.getOrElse { emptyList() }
 
     private fun encodeSelections(map: Map<String, AutoEqSelection>): String =
         json.encodeToString(selectionsSerializer, map)
@@ -316,6 +346,8 @@ class SettingsStore(context: Context) {
         const val PROVIDER_AUTOEQ = "AUTOEQ"
         const val PROVIDER_OPRA = "OPRA"
         private val KEY_RECENT_PROFILES = stringPreferencesKey("recent_profiles_json")
+        private val KEY_RECENT_OPRA = stringPreferencesKey("recent_opra_profiles_json")
+        private val KEY_OPRA_PARSER_VERSION = intPreferencesKey("opra_parser_version")
 
         /** Spinner / quick-pick capacity. */
         const val MAX_RECENT = 10
@@ -330,6 +362,7 @@ class SettingsStore(context: Context) {
         private val gainsSerializer = ListSerializer(Float.serializer())
         private val presetsSerializer = ListSerializer(GraphicEqPreset.serializer())
         private val recentsSerializer = ListSerializer(AutoEqCatalogEntry.serializer())
+        private val recentOpraSerializer = ListSerializer(RecentOpraProfile.serializer())
     }
 }
 

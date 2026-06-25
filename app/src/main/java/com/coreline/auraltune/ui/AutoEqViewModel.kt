@@ -15,6 +15,8 @@ import com.coreline.autoeq.search.AutoEqSearchEngine
 import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.audio.MusicPlayerController
+import com.coreline.auraltune.data.GraphicEqPreset
+import com.coreline.auraltune.data.RecentOpraProfile
 import com.coreline.auraltune.data.SettingsStore
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 import com.coreline.auraltune.opra.OpraSyncResult
@@ -102,14 +104,25 @@ class AutoEqViewModel(
                 AutoEqSearchEngine.Result(emptyList(), 0),
             )
 
-    private val _selectedProfile = MutableStateFlow<AutoEqProfile?>(null)
-    val selectedProfile: StateFlow<AutoEqProfile?> = _selectedProfile.asStateFlow()
+    // 탭별 독립 선택: AutoEQ 탭 / OPRA 탭이 각자 마지막 선택을 기억(영속은 settings.selectedProfileId /
+    // activeOpraProfileId). 각 탭의 StatusCard·그래프는 자기 탭 선택을 표시한다. 엔진은 한 번에 하나만
+    // 재생 가능하므로 '실제 사용중'은 activeProfile(=활성 provider의 선택) 하나뿐이다.
+    private val _selectedAutoEqProfile = MutableStateFlow<AutoEqProfile?>(null)
+    val selectedAutoEqProfile: StateFlow<AutoEqProfile?> = _selectedAutoEqProfile.asStateFlow()
+    private val _selectedOpraProfile = MutableStateFlow<AutoEqProfile?>(null)
+    val selectedOpraProfile: StateFlow<AutoEqProfile?> = _selectedOpraProfile.asStateFlow()
 
-    /** 현재 적용된 보정의 소스(provider) — 상태카드/플레이어의 AutoEQ/OPRA 배지용. */
+    /** 현재 적용된 보정의 소스(provider) — 어느 탭이 '현재 사용중'인지 결정. */
     val correctionProvider: StateFlow<String> =
         settings.activeCorrectionProvider.stateIn(
             viewModelScope, SharingStarted.Eagerly, SettingsStore.PROVIDER_AUTOEQ,
         )
+
+    /** 실제 엔진에 적용 중(=현재 사용중)인 프로파일 = 활성 provider의 선택. 플레이어/미니 배지용. */
+    val activeProfile: StateFlow<AutoEqProfile?> =
+        combine(correctionProvider, _selectedAutoEqProfile, _selectedOpraProfile) { p, autoSel, opraSel ->
+            if (p == SettingsStore.PROVIDER_OPRA) opraSel else autoSel
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     /**
      * A/B/C 청취 비교 모드 — 킬스위치 + AutoEQ correction 토글을 대체한다.
@@ -137,6 +150,10 @@ class AutoEqViewModel(
     /** 최근(빠른 선택) 프로파일 — 스피너용. 최근 선택순, 최대 10개. 첫 실행 시 10개 pre-seed. */
     val recentProfiles: StateFlow<List<AutoEqCatalogEntry>> =
         settings.recentProfiles.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** OPRA 최근(빠른 선택) 기록 — 최근순, 최대 10개. */
+    val recentOpraProfiles: StateFlow<List<RecentOpraProfile>> =
+        settings.recentOpraProfiles.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // ── OPRA 비교 탭 상태 (별도 소스, 같은 엔진) ──────────────────────────────────
     private val _opraQuery = MutableStateFlow("")
@@ -255,18 +272,10 @@ class AutoEqViewModel(
         //   - UI selectProfile(entry)             ⇒ delegates to deviceManager directly
         //   - AudioDeviceCallback route change   ⇒ deviceManager reconcile() handles it
         viewModelScope.launch {
-            // 마지막 활성 provider가 OPRA면 아래 OPRA 복원 블록이 담당한다. AutoEQ 복원이 여기서
-            // 프로파일을 적용하면 OPRA 선택을 덮어쓰고(_selectedProfile/엔진), selectedProfileId가
-            // AutoEQ로 남아 이후 reconcile에서 OPRA를 다시 clobber한다 → provider==OPRA면 skip.
-            if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) return@launch
-            val savedId = settings.selectedProfileId.first()
-            if (savedId == null) {
-                // No saved profile — manager will clear the engine on its first reconcile().
-                _selectedProfile.value = null
-                return@launch
-            }
-
-            // Wait for catalog to be loaded so we can look up the entry.
+            // AutoEQ 선택을 '표시용'으로 항상 복원한다(탭별 독립 선택). 엔진 적용은 AutoEQ가 활성
+            // provider일 때만 — OPRA가 활성이면 엔진은 아래 OPRA 복원이 담당하고, 여기선 AutoEQ 탭
+            // StatusCard/그래프에 보여줄 선택만 채운다(엔진 clobber 금지).
+            val savedId = settings.selectedProfileId.first() ?: return@launch
             val loaded = catalogState.first { it is CatalogState.Loaded } as CatalogState.Loaded
             val entry = loaded.entries.firstOrNull { it.id == savedId }
             if (entry == null) {
@@ -274,18 +283,24 @@ class AutoEqViewModel(
                 settings.setSelectedProfileId(null)
                 return@launch
             }
-            val applied = deviceManager.selectProfileForCurrentDevice(entry)
-            if (applied) {
-                _selectedProfile.value = api.resolve(entry)?.validated()
+            val autoEqActive = settings.activeCorrectionProvider.first() != SettingsStore.PROVIDER_OPRA
+            if (autoEqActive && deviceManager.selectProfileForCurrentDevice(entry)) {
+                _selectedAutoEqProfile.value = api.resolve(entry)?.validated()
+            } else {
+                // 표시용으로만 복원(엔진은 건드리지 않음).
+                _selectedAutoEqProfile.value = api.resolve(entry)?.validated()
             }
         }
 
         // Track explicit clears at runtime (settings.selectedProfileId → null).
         viewModelScope.launch {
             settings.selectedProfileId.collect { id ->
-                if (id == null && _selectedProfile.value != null) {
-                    _selectedProfile.value = null
-                    deviceManager.clearProfileForCurrentDevice()
+                if (id == null && _selectedAutoEqProfile.value != null) {
+                    _selectedAutoEqProfile.value = null
+                    // AutoEQ가 활성일 때만 엔진을 비운다(OPRA 재생 중이면 건드리지 않음).
+                    if (correctionProvider.value == SettingsStore.PROVIDER_AUTOEQ) {
+                        deviceManager.clearProfileForCurrentDevice()
+                    }
                 }
             }
         }
@@ -354,21 +369,36 @@ class AutoEqViewModel(
         // (번들은 commit 기준 NoChange로도 한 번 더 가드). 번들 검증 실패 시엔 카탈로그가 빈 채로
         // 남아 다음 콜드스타트에 재시도(크래시/ANR 없음, 업데이트로 자가복구).
         viewModelScope.launch {
-            if (opraRepository.observeCatalog().first().isEmpty()) {
-                syncOpra(notify = false)
-            } else {
-                _opraSyncState.value = opraRepository.syncState()
+            val catalogEmpty = opraRepository.observeCatalog().first().isEmpty()
+            val parserStale = settings.opraParserVersion.first() < OPRA_PARSER_VERSION
+            when {
+                // 빈 카탈로그: 일반 시드(commit 기준 파싱).
+                catalogEmpty -> {
+                    if (syncOpra(notify = false) !is OpraSyncResult.Failed) {
+                        settings.setOpraParserVersion(OPRA_PARSER_VERSION)
+                    }
+                }
+                // 데이터는 있으나 옛 파서로 파싱됨: commit이 같아도 1회 강제 재파싱(이름 매핑 수정 전파).
+                parserStale -> {
+                    if (syncOpra(notify = false, force = true) !is OpraSyncResult.Failed) {
+                        settings.setOpraParserVersion(OPRA_PARSER_VERSION)
+                    } else {
+                        _opraSyncState.value = opraRepository.syncState()
+                    }
+                }
+                else -> _opraSyncState.value = opraRepository.syncState()
             }
         }
-        // OPRA: 마지막 활성 provider가 OPRA였다면 선택을 복원해 같은 엔진에 적용(AutoEq 복원 뒤에 override).
+        // OPRA 선택도 '표시용'으로 항상 복원(탭별 독립). 엔진 적용은 OPRA가 활성일 때만(AutoEq 복원 뒤 override).
         viewModelScope.launch {
-            if (settings.activeCorrectionProvider.first() != SettingsStore.PROVIDER_OPRA) return@launch
             val id = settings.activeOpraProfileId.first() ?: return@launch
             // OPRA 카탈로그가 적어도 한 번 로드된 뒤 resolve(첫 import 완료 대기).
             opraRepository.observeCatalog().first { it.isNotEmpty() }
             val auto = opraRepository.resolveById(id)?.toAutoEqProfile() ?: return@launch
-            deviceManager.applyResolvedProfile(auto)
-            _selectedProfile.value = auto.validated()
+            _selectedOpraProfile.value = auto.validated()
+            if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) {
+                deviceManager.applyResolvedProfile(auto)
+            }
         }
         // 최초 1회: 최근 프로파일이 비어 있으면 카탈로그 Loaded 시점에 큐레이션 10개를 pre-seed.
         // 경합 안전: empty-check+write를 settings 내부 store.edit 1트랜잭션으로 처리(사용자 탭과 무손실).
@@ -380,6 +410,44 @@ class AutoEqViewModel(
             val seed = SEED_PROFILE_NAMES.mapNotNull { name -> pickPreferredEntry(byName[name.lowercase().trim()]) }
             settings.seedRecentProfilesIfEmpty(seed)
         }
+        // 디버그 빌드 전용: 그래픽 EQ 테스트 프리셋 3종을 보장(고정 id라 매 실행 upsert해도 중복 없음).
+        if (BuildConfig.DEBUG) {
+            viewModelScope.launch { seedTestPresets() }
+        }
+    }
+
+    /**
+     * DEBUG 전용 테스트 프리셋 3종(저음 부스트 / V자 / 고음 컷)을 고정 id로 upsert.
+     * 고정 id라 매 실행해도 중복되지 않고, 사용자 프리셋(랜덤 UUID)과 충돌하지 않는다.
+     * (사용자가 삭제해도 다음 실행에 다시 생김 — 테스트 픽스처 용도.)
+     */
+    private suspend fun seedTestPresets() {
+        val now = System.currentTimeMillis()
+        fun gains(vararg v: Float): List<Float> =
+            FloatArray(GraphicEqBands.COUNT) { i -> v.getOrElse(i) { 0f } }.toList()
+        listOf(
+            GraphicEqPreset(
+                id = "test-bass-boost",
+                name = "테스트 · 저음 부스트",
+                gainsDb = gains(8f, 8f, 7f, 6f, 5f, 4f, 3f, 2f, 1f),
+                createdAtMs = now,
+                updatedAtMs = now,
+            ),
+            GraphicEqPreset(
+                id = "test-v-shape",
+                name = "테스트 · V자",
+                gainsDb = gains(6f, 6f, 5f, 4f, 2f, 0f, -2f, -3f, -4f, -4f, -3f, -2f, 0f, 2f, 3f, 4f, 5f, 6f, 6f, 6f),
+                createdAtMs = now,
+                updatedAtMs = now,
+            ),
+            GraphicEqPreset(
+                id = "test-treble-cut",
+                name = "테스트 · 고음 컷",
+                gainsDb = gains(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, -1f, -2f, -3f, -4f, -5f, -6f, -7f, -8f, -8f),
+                createdAtMs = now,
+                updatedAtMs = now,
+            ),
+        ).forEach { settings.upsertGraphicEqPreset(it) }
     }
 
     /** 슬라이더 → 밴드 게인 설정(현재 선택 한계로 clamp). 적용은 debounce 흐름이 담당. */
@@ -514,14 +582,13 @@ class AutoEqViewModel(
      */
     fun selectProfile(entry: AutoEqCatalogEntry) {
         viewModelScope.launch {
-            val applied = deviceManager.selectProfileForCurrentDevice(entry)
-            if (applied) {
-                _selectedProfile.value = api.resolve(entry)?.validated()
-            }
-            // Record into the quick-pick spinner regardless of route eligibility so the user
-            // can re-select later (selection persists via settings.selectedProfileId too).
+            // 표시용 선택은 라우트 적격성과 무관하게 항상 기억(탭별 독립). 엔진 적용은 deviceManager가 담당.
+            val resolved = api.resolve(entry)?.validated()
+            deviceManager.selectProfileForCurrentDevice(entry)
+            _selectedAutoEqProfile.value = resolved
+            // Record into the quick-pick spinner so the user can re-select later.
             settings.addRecentProfile(entry)
-            // Selecting an AutoEQ profile makes AUTOEQ the active correction provider.
+            // Selecting an AutoEQ profile makes AUTOEQ the active correction provider (현재 사용중).
             settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
         }
     }
@@ -542,11 +609,11 @@ class AutoEqViewModel(
      * [opraSyncMutex]로 직렬화 — 비원자적 check-then-set 대신 동시 import를 원천 차단하고,
      * init 자동 import 중 사용자가 새로고침해도 무음 드롭 없이 뒤이어 실행된다(스피너 유지).
      */
-    private suspend fun syncOpra(notify: Boolean) {
+    private suspend fun syncOpra(notify: Boolean, force: Boolean = false): OpraSyncResult =
         opraSyncMutex.withLock {
             _opraRefreshing.value = true
             try {
-                val result = withContext(Dispatchers.IO) { opraRepository.refresh() }
+                val result = withContext(Dispatchers.IO) { opraRepository.refresh(force) }
                 _opraSyncState.value = opraRepository.syncState()
                 if (notify) {
                     _importMessage.value = when (result) {
@@ -555,11 +622,11 @@ class AutoEqViewModel(
                         is OpraSyncResult.Failed -> "OPRA 갱신 실패: ${result.reason}"
                     }
                 }
+                result
             } finally {
                 _opraRefreshing.value = false
             }
         }
-    }
 
     /** OPRA 행 탭 → 상세 시트 표시용으로 프로파일을 resolve(적용은 아직 안 함). */
     fun openOpraDetail(entry: OpraCatalogEntry) {
@@ -590,16 +657,67 @@ class AutoEqViewModel(
                 return@launch
             }
             deviceManager.applyResolvedProfile(auto)
-            _selectedProfile.value = auto.validated()
+            _selectedOpraProfile.value = auto.validated()
             settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
             settings.setActiveOpraProfileId(opra.id)
+            settings.addRecentOpraProfile(opra.id, opra.profileName)
         }
     }
 
-    fun clearProfile() {
+    /** OPRA 빠른선택(최근) → id로 resolve해 상세 시트 없이 바로 적용(현재 사용중). */
+    fun selectOpraRecent(recent: RecentOpraProfile) {
         viewModelScope.launch {
-            deviceManager.clearProfileForCurrentDevice()
-            _selectedProfile.value = null
+            val auto = opraRepository.resolveById(recent.id)?.toAutoEqProfile()
+            if (auto == null) {
+                _importMessage.value = "이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)"
+                return@launch
+            }
+            deviceManager.applyResolvedProfile(auto)
+            _selectedOpraProfile.value = auto.validated()
+            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
+            settings.setActiveOpraProfileId(recent.id)
+            settings.addRecentOpraProfile(recent.id, recent.name)
+        }
+    }
+
+    /** AutoEQ 탭 선택 해제. 활성 중이면 엔진+영속 정리, 미활성이면 표시/영속만(OPRA 재생 보존). */
+    fun clearAutoEqSelection() {
+        viewModelScope.launch {
+            _selectedAutoEqProfile.value = null
+            if (correctionProvider.value == SettingsStore.PROVIDER_AUTOEQ) {
+                deviceManager.clearProfileForCurrentDevice()
+            } else {
+                settings.setSelectedProfileId(null)
+            }
+        }
+    }
+
+    /** OPRA 탭 선택 해제. 활성 중이면 엔진만 비운다(AutoEQ 기억/영속은 보존). */
+    fun clearOpraSelection() {
+        viewModelScope.launch {
+            _selectedOpraProfile.value = null
+            settings.setActiveOpraProfileId(null)
+            if (correctionProvider.value == SettingsStore.PROVIDER_OPRA) {
+                deviceManager.clearEngineOnly()
+            }
+        }
+    }
+
+    /** 비활성 AutoEQ 선택을 '지금 사용' — 다시 엔진에 적용하고 AUTOEQ를 활성 provider로. */
+    fun useAutoEqSelection() {
+        val p = _selectedAutoEqProfile.value ?: return
+        viewModelScope.launch {
+            deviceManager.applyResolvedProfile(p)
+            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+        }
+    }
+
+    /** 비활성 OPRA 선택을 '지금 사용' — 다시 엔진에 적용하고 OPRA를 활성 provider로. */
+    fun useOpraSelection() {
+        val p = _selectedOpraProfile.value ?: return
+        viewModelScope.launch {
+            deviceManager.applyResolvedProfile(p)
+            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
         }
     }
 
@@ -698,7 +816,8 @@ class AutoEqViewModel(
     fun deleteImported(id: String) {
         viewModelScope.launch {
             api.deleteImported(id)
-            if (selectedProfile.value?.id == id) clearProfile()
+            // 가져온 프로파일은 AutoEQ 소스 — AutoEQ 탭 선택이 그거면 해제.
+            if (_selectedAutoEqProfile.value?.id == id) clearAutoEqSelection()
         }
     }
 
@@ -715,6 +834,12 @@ class AutoEqViewModel(
 
         /** Max OPRA rows shown in the list/search (DB-side LIMIT). */
         private const val OPRA_LIST_LIMIT = 100
+
+        /**
+         * OPRA 파서/매핑 버전. 올리면 기존 설치본이 init에서 1회 강제 재파싱한다.
+         * v2: profileName을 헤드폰명(vendor+product)으로 보정(이전엔 details 노트가 이름이 됨).
+         */
+        private const val OPRA_PARSER_VERSION = 2
 
         /** OPRA 추천 목록을 띄우는 최소 검색어 길이 — 그 미만은 빈 목록(안내만). */
         private const val OPRA_MIN_QUERY_LENGTH = 2

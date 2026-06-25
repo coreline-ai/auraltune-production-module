@@ -210,6 +210,14 @@ class DeviceAutoEqManager(
         pushToEngine(profile.validated())
     }
 
+    /**
+     * 엔진 AutoEQ 체인만 비운다(영속 상태 불변). 활성 OPRA 보정을 해제하되 기억해 둔 per-device
+     * AutoEQ 선택을 지우지 않기 위함 — provider별 선택을 ViewModel이 독립적으로 소유하기 때문.
+     */
+    fun clearEngineOnly() {
+        engine.clearAutoEq()
+    }
+
     private fun pushToEngine(p: AutoEqProfile) {
         val n = p.filters.size
         val types = IntArray(n)

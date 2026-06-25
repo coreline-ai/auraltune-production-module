@@ -31,7 +31,7 @@ class OpraRepositoryImpl(
     override suspend fun syncState(): OpraSyncState? =
         store.syncState()
 
-    override suspend fun refresh(): OpraSyncResult {
+    override suspend fun refresh(force: Boolean): OpraSyncResult {
         val snapshot = runCatching { source.fetch() }.getOrElse {
             Log.w(TAG, "snapshot fetch failed; keeping cache", it)
             return OpraSyncResult.Failed("fetch: ${it.message ?: it::class.simpleName}")
@@ -39,7 +39,8 @@ class OpraRepositoryImpl(
 
         val current = store.syncState()
         val newCommit = snapshot.syncState.opraCommit
-        if (newCommit != null && newCommit == current?.opraCommit) {
+        // force=true는 commit이 같아도 재파싱한다(파서/매핑 수정을 기존 캐시에 전파).
+        if (!force && newCommit != null && newCommit == current?.opraCommit) {
             return OpraSyncResult.NoChange
         }
 

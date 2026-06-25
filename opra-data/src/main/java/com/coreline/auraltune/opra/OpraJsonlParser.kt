@@ -75,16 +75,26 @@ class OpraJsonlParser(private val json: Json = DEFAULT_JSON) : OpraParser {
         }
 
         // Join eq -> product -> vendor for the OPRA tab; count orphans (best-effort surfaced).
+        // 같은 join에서 프로파일 표시명(profileName)을 헤드폰명(vendor + product)으로 보정한다.
+        // (toProfile은 product를 모르므로 profileName이 details 노트/author로 채워져 상태카드·상세 제목이
+        //  "Measured by …" 같은 노트로 나오던 문제를 여기서 바로잡는다. product가 없으면 기존 값 유지.)
         var orphanProfiles = 0
+        val enrichedProfiles = ArrayList<OpraEqProfile>(profiles.size)
         val catalog = profiles.map { p ->
             val product = p.productId?.let { products[it] }
             if (product == null) orphanProfiles++
             val vendor = product?.vendorId?.let { vendors[it] }
             val vendorName = vendor?.name ?: UNKNOWN_VENDOR
             val productName = product?.name ?: UNKNOWN_PRODUCT
+            val displayName = listOf(vendorName, productName).filter { it.isNotBlank() }.joinToString(" ")
+            enrichedProfiles += if (product != null && displayName.isNotBlank()) {
+                p.copy(profileName = displayName)
+            } else {
+                p
+            }
             OpraCatalogEntry(
                 id = p.id,
-                displayName = listOf(vendorName, productName).filter { it.isNotBlank() }.joinToString(" "),
+                displayName = displayName,
                 vendorName = vendorName,
                 productName = productName,
                 author = p.author,
@@ -97,7 +107,7 @@ class OpraJsonlParser(private val json: Json = DEFAULT_JSON) : OpraParser {
         return OpraParseResult(
             vendors = vendors.values.toList(),
             products = products.values.toList(),
-            profiles = profiles,
+            profiles = enrichedProfiles,
             catalogEntries = catalog,
             malformedLines = malformed,
             orphanProfiles = orphanProfiles,

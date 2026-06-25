@@ -61,6 +61,11 @@ interface OpraRepository {
     suspend fun resolveById(profileId: String): OpraEqProfile?
     /** Current snapshot provenance (commit/version/source/license) for the about/diagnostics UI. */
     suspend fun syncState(): OpraSyncState?
-    /** Refresh from the configured source (debug: GitHub raw; release: bundled snapshot). */
-    suspend fun refresh(): OpraSyncResult
+    /**
+     * Refresh from the configured source (debug: GitHub raw; release: bundled snapshot).
+     * [force]=true re-parses + re-imports even when the snapshot commit is unchanged — used to
+     * propagate a parser/mapping fix to existing installs (the commit-based NoChange guard would
+     * otherwise skip re-parsing identical source data).
+     */
+    suspend fun refresh(force: Boolean = false): OpraSyncResult
 }

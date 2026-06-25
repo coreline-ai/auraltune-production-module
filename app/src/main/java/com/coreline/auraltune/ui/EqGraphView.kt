@@ -9,6 +9,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -80,10 +81,12 @@ fun EqGraphView(
         if (autoSpecs.isEmpty()) null else BiquadResponse.compositeDb(freqs, autoSpecs, SAMPLE_RATE)
     }
 
-    val gridColor = Color(0x22000000)
-    val zeroColor = Color(0x55000000)
-    val autoColor = Color(0xFF9E9E9E)
-    val compositeColor = Color(0xFF2962FF)
+    val colorScheme = MaterialTheme.colorScheme
+    val graphBackground = colorScheme.surfaceContainerLowest
+    val gridColor = colorScheme.outlineVariant.copy(alpha = 0.36f)
+    val zeroColor = colorScheme.outline.copy(alpha = 0.55f)
+    val autoColor = colorScheme.onSurfaceVariant.copy(alpha = 0.72f)
+    val compositeColor = colorScheme.secondaryContainer
     val preampColor = Color(0xFFFF6D00) // orange — distinct from blue composite / gray AutoEQ
 
     Canvas(
@@ -94,36 +97,48 @@ fun EqGraphView(
     ) {
         val w = size.width
         val h = size.height
+        val leftPad = 8f
+        val rightPad = 8f
+        val topPad = 16f
+        val bottomPad = 16f
+        val plotLeft = leftPad
+        val plotRight = (w - rightPad).coerceAtLeast(plotLeft + 1f)
+        val plotTop = topPad
+        val plotBottom = (h - bottomPad).coerceAtLeast(plotTop + 1f)
+        val plotWidth = plotRight - plotLeft
+        val plotHeight = plotBottom - plotTop
+
+        drawRect(graphBackground)
 
         fun xOf(freqHz: Double): Float {
             val t = (log10(freqHz) - log10(MIN_HZ)) / (log10(MAX_HZ) - log10(MIN_HZ))
-            return (t * w).toFloat()
+            return plotLeft + (t * plotWidth).toFloat()
         }
         fun yOf(db: Double): Float {
             val clamped = db.coerceIn(-MAX_DB, MAX_DB)
-            return (h * (0.5 - clamped / (2 * MAX_DB))).toFloat()
+            return plotTop + (plotHeight * (0.5 - clamped / (2 * MAX_DB))).toFloat()
         }
 
         // Vertical grid at decade marks (100, 1k, 10k) + octave-ish helpers.
         for (f in listOf(50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0)) {
             val x = xOf(f)
-            drawLine(gridColor, Offset(x, 0f), Offset(x, h), strokeWidth = 1f)
+            drawLine(gridColor, Offset(x, plotTop), Offset(x, plotBottom), strokeWidth = 1f)
         }
         // Horizontal dB grid lines every 5 dB.
         for (db in listOf(-15.0, -10.0, -5.0, 5.0, 10.0, 15.0)) {
             val y = yOf(db)
-            drawLine(gridColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+            drawLine(gridColor, Offset(plotLeft, y), Offset(plotRight, y), strokeWidth = 1f)
         }
         // 0 dB baseline.
-        drawLine(zeroColor, Offset(0f, yOf(0.0)), Offset(w, yOf(0.0)), strokeWidth = 2f)
+        drawLine(zeroColor, Offset(plotLeft, yOf(0.0)), Offset(plotRight, yOf(0.0)), strokeWidth = 2f)
 
         // Preamp reference line (orange dashed, horizontal) at the profile's preamp level.
         if (showPreamp && kotlin.math.abs(preampDb) > 0.05f) {
             val y = yOf(preampDb.toDouble())
             drawLine(
                 preampColor,
-                Offset(0f, y),
-                Offset(w, y),
+                Offset(plotLeft, y),
+                Offset(plotRight, y),
                 strokeWidth = 2f,
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 6f)),
             )

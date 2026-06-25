@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>AuralTune Pro - Player</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "tertiary-fixed-dim": "#ffb3ac",
+                      "on-secondary-fixed": "#002021",
+                      "on-tertiary-fixed": "#410003",
+                      "inverse-primary": "#0f52db",
+                      "on-surface-variant": "#c3c5d7",
+                      "on-secondary-fixed-variant": "#004f53",
+                      "on-secondary-container": "#006c71",
+                      "secondary-fixed": "#63f7ff",
+                      "outline": "#8d90a0",
+                      "inverse-surface": "#e5e1e4",
+                      "surface-tint": "#b5c4ff",
+                      "surface-container-highest": "#353437",
+                      "surface-variant": "#353437",
+                      "on-error-container": "#ffdad6",
+                      "primary-fixed": "#dbe1ff",
+                      "primary-container": "#648aff",
+                      "primary": "#b5c4ff",
+                      "on-primary-fixed": "#00164d",
+                      "surface-container-lowest": "#0e0e10",
+                      "tertiary-container": "#ff544e",
+                      "inverse-on-surface": "#313032",
+                      "on-primary-fixed-variant": "#003cac",
+                      "on-primary-container": "#00236c",
+                      "background": "#131315",
+                      "on-surface": "#e5e1e4",
+                      "on-background": "#e5e1e4",
+                      "outline-variant": "#434655",
+                      "error-container": "#93000a",
+                      "secondary": "#e6feff",
+                      "on-error": "#690005",
+                      "surface-container": "#201f21",
+                      "on-primary": "#00297b",
+                      "surface-container-high": "#2a2a2c",
+                      "tertiary-fixed": "#ffdad6",
+                      "surface-container-low": "#1c1b1d",
+                      "error": "#ffb4ab",
+                      "on-secondary": "#003739",
+                      "secondary-fixed-dim": "#00dce5",
+                      "on-tertiary": "#680008",
+                      "surface-dim": "#131315",
+                      "secondary-container": "#00f4fe",
+                      "on-tertiary-fixed-variant": "#930010",
+                      "tertiary": "#ffb3ac",
+                      "surface": "#131315",
+                      "on-tertiary-container": "#5c0006",
+                      "primary-fixed-dim": "#b5c4ff",
+                      "surface-bright": "#39393b"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "unit": "4px",
+                      "gutter": "16px",
+                      "margin": "24px",
+                      "container-max": "1440px"
+              },
+              "fontFamily": {
+                      "data-display": ["Geist"],
+                      "body-md": ["Inter"],
+                      "headline-md": ["Geist"],
+                      "headline-lg-mobile": ["Geist"],
+                      "label-sm": ["Geist"],
+                      "headline-lg": ["Geist"]
+              },
+              "fontSize": {
+                      "data-display": ["14px", { "lineHeight": "1", "letterSpacing": "0.05em", "fontWeight": "500" }],
+                      "body-md": ["16px", { "lineHeight": "1.6", "fontWeight": "400" }],
+                      "headline-md": ["20px", { "lineHeight": "1.4", "fontWeight": "600" }],
+                      "headline-lg-mobile": ["24px", { "lineHeight": "1.2", "fontWeight": "700" }],
+                      "label-sm": ["12px", { "lineHeight": "1", "fontWeight": "600" }],
+                      "headline-lg": ["32px", { "lineHeight": "1.2", "letterSpacing": "-0.02em", "fontWeight": "700" }]
+              }
+            }
+          }
+        }
+    </script>
+<style>
+        /* Custom styles for DAW/Hardware feel */
+        .glass-panel {
+            background: rgba(32, 31, 33, 0.7);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+        }
+        .hardware-btn {
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .hardware-btn:active {
+            box-shadow: inset 0 2px 5px rgba(0,0,0,0.5);
+        }
+        .neon-glow {
+            text-shadow: 0 0 10px rgba(0, 244, 254, 0.5);
+        }
+        .inner-slot {
+            box-shadow: inset 0 2px 6px rgba(0,0,0,0.8);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background text-on-background font-body-md h-screen w-screen overflow-hidden flex flex-col antialiased selection:bg-secondary-container selection:text-on-secondary-container">
+<!-- TopAppBar (JSON Sourced) -->
+<header class="flex justify-between items-center w-full px-4 h-16 bg-background dark:bg-background text-primary dark:text-primary font-title-md text-title-md docked full-width top-0 flat no shadows transition-colors duration-200 z-40 shrink-0">
+<button class="flex items-center justify-center p-2 rounded-full hover:bg-surface-variant dark:hover:bg-surface-variant transition-colors duration-200">
+<span class="material-symbols-outlined" data-icon="menu">menu</span>
+</button>
+<h1 class="font-headline-lg text-headline-lg font-bold text-primary dark:text-primary tracking-tight">AuralTune</h1>
+<div class="w-[40px] h-[40px]"></div> <!-- Spacer for center alignment -->
+</header>
+<!-- Main Content Canvas -->
+<main class="flex-1 overflow-y-auto px-4 pb-28 pt-2 flex flex-col gap-margin relative z-10 scrollbar-hide">
+<!-- Now Playing Card -->
+<section class="glass-panel rounded-xl p-4 flex flex-col gap-gutter">
+<!-- Visualizer Area -->
+<div class="w-full h-56 bg-surface-container-lowest rounded-lg inner-slot overflow-hidden relative group">
+<img class="absolute inset-0 w-full h-full object-cover opacity-80 mix-blend-screen" data-alt="A highly detailed, professional digital audio workstation interface element showing a vibrant electric blue and neon cyan glowing audio waveform visualizer. The background is a deep, pristine obsidian black. The style embodies industrial modernism and high-tech precision, featuring sharp architectural lines, subtle background grid elements, and glowing data nodes that evoke a sense of advanced studio engineering." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCmX45T_Rh68sC3J8HOuwGgGNdlJ1MYx9-8h4Bgv2MjFKcjPQ41DIEI6v_dSouLTJzLPOp0sJDWYbKl9yUGvbHUHljt4PGxdeLViLhfLpvQEgnh7ryTKPWNLL0jfixN5TSGPlbs8V0kmfWQVk_yj30RJr_sfLIcumCrRGRbJckHAApEviZ4LPxeDNKp5uTtvhxDnTAWeN6JgtvSgulhvHhYdw9LTr0plBYN34XSnejzTrvoLIa8zlLj6sABpHatrsWQLrwur-WUinc"/>
+<div class="absolute inset-0 bg-gradient-to-t from-surface-container-lowest via-transparent to-transparent"></div>
+<!-- Badge Overlay -->
+<div class="absolute top-3 left-3 bg-surface-container-highest/80 backdrop-blur-md border border-outline-variant rounded px-2 py-1 flex items-center gap-1.5 shadow-md">
+<span class="material-symbols-outlined text-[14px] text-secondary-container" data-icon="graphic_eq" style="font-variation-settings: 'FILL' 1;">graphic_eq</span>
+<span class="font-label-sm text-label-sm text-secondary-container uppercase tracking-wider">AutoEQ Active</span>
+</div>
+</div>
+<!-- Track Info -->
+<div class="flex flex-col items-center text-center gap-1 mt-2">
+<h2 class="font-headline-lg-mobile text-headline-lg-mobile text-on-surface truncate w-full px-2">The Night (Demo)</h2>
+<div class="flex items-center justify-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[16px]" data-icon="headphones">headphones</span>
+<span class="font-body-md text-body-md">Sennheiser HD 600</span>
+</div>
+</div>
+<!-- Progress Technical Slider -->
+<div class="flex flex-col gap-2 mt-4 px-2">
+<div class="w-full h-2 bg-surface-container-lowest rounded-full inner-slot relative cursor-pointer">
+<!-- Progress Fill -->
+<div class="absolute top-0 left-0 h-full w-[45%] bg-secondary-container rounded-full shadow-[0_0_12px_rgba(0,244,254,0.6)]"></div>
+<!-- Tactile Handle -->
+<div class="absolute top-1/2 left-[45%] -translate-y-1/2 -translate-x-1/2 w-4 h-6 bg-inverse-surface rounded-[2px] border border-outline shadow-md flex items-center justify-center pointer-events-none">
+<div class="w-[2px] h-3 bg-surface-container-highest rounded-full"></div>
+</div>
+</div>
+<div class="flex justify-between items-center px-1">
+<span class="font-data-display text-data-display text-secondary-container neon-glow">01:42</span>
+<span class="font-data-display text-data-display text-on-surface-variant">04:15</span>
+</div>
+</div>
+</section>
+<!-- Transport Controls -->
+<section class="flex justify-center items-center gap-8 py-2">
+<button class="p-3 text-on-surface-variant hover:text-secondary-container active:scale-95 transition-all duration-200 rounded-full hover:bg-surface-container">
+<span class="material-symbols-outlined text-[36px]" data-icon="skip_previous" style="font-variation-settings: 'FILL' 1;">skip_previous</span>
+</button>
+<!-- Large Play Button -->
+<button class="w-[72px] h-[72px] rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center hardware-btn shadow-[0_0_25px_rgba(0,244,254,0.3)] active:scale-95 transition-all duration-200 relative group overflow-hidden">
+<div class="absolute inset-0 rounded-full border border-white/30 group-active:border-transparent"></div>
+<span class="material-symbols-outlined text-[40px] translate-x-0.5" data-icon="play_arrow" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+<button class="p-3 text-on-surface-variant hover:text-secondary-container active:scale-95 transition-all duration-200 rounded-full hover:bg-surface-container">
+<span class="material-symbols-outlined text-[36px]" data-icon="skip_next" style="font-variation-settings: 'FILL' 1;">skip_next</span>
+</button>
+</section>
+<!-- File Action Row -->
+<section class="grid grid-cols-2 gap-gutter mt-2">
+<button class="flex items-center justify-center gap-2 py-3 px-4 bg-surface-container border border-outline-variant rounded-lg hardware-btn text-on-surface hover:bg-surface-container-high transition-colors font-label-sm text-label-sm uppercase tracking-wide">
+<span class="material-symbols-outlined text-[18px]" data-icon="note_add">note_add</span>
+                Add Files
+            </button>
+<button class="flex items-center justify-center gap-2 py-3 px-4 bg-surface-container border border-outline-variant rounded-lg hardware-btn text-on-surface hover:bg-surface-container-high transition-colors font-label-sm text-label-sm uppercase tracking-wide">
+<span class="material-symbols-outlined text-[18px]" data-icon="clear_all">clear_all</span>
+                Clear Queue
+            </button>
+</section>
+<!-- Queue List -->
+<section class="flex flex-col gap-2 mt-2 bg-surface-container-low rounded-xl p-3 border border-surface-bright/20">
+<div class="px-2 pb-2 border-b border-surface-variant mb-1 flex items-center justify-between">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">Up Next</span>
+<span class="font-data-display text-data-display text-on-surface-variant text-[12px]">2 Tracks</span>
+</div>
+<!-- Current Track Indicator (Simulated in Queue) -->
+<div class="flex items-center justify-between p-3 bg-surface-container-highest rounded-lg border-l-2 border-secondary-container shadow-md">
+<div class="flex items-center gap-3 overflow-hidden">
+<span class="material-symbols-outlined text-secondary-container animate-pulse" data-icon="equalizer">equalizer</span>
+<div class="flex flex-col truncate">
+<span class="font-body-md text-body-md text-secondary-container font-medium truncate">The Night (Demo)</span>
+<span class="font-label-sm text-label-sm text-on-surface-variant">FLAC • 44.1kHz</span>
+</div>
+</div>
+<span class="font-data-display text-data-display text-on-surface-variant pl-2">04:15</span>
+</div>
+<!-- Queue Item 2 -->
+<div class="flex items-center justify-between p-3 rounded-lg hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="flex items-center gap-3 overflow-hidden text-on-surface-variant group-hover:text-on-surface">
+<span class="font-data-display text-data-display opacity-50 w-6 text-center">2</span>
+<div class="flex flex-col truncate">
+<span class="font-body-md text-body-md font-medium truncate">Vocal Comp Take 4</span>
+<span class="font-label-sm text-label-sm opacity-70">WAV • 96kHz</span>
+</div>
+</div>
+<span class="font-data-display text-data-display text-on-surface-variant pl-2">03:22</span>
+</div>
+<!-- Queue Item 3 -->
+<div class="flex items-center justify-between p-3 rounded-lg hover:bg-surface-container transition-colors group cursor-pointer">
+<div class="flex items-center gap-3 overflow-hidden text-on-surface-variant group-hover:text-on-surface">
+<span class="font-data-display text-data-display opacity-50 w-6 text-center">3</span>
+<div class="flex flex-col truncate">
+<span class="font-body-md text-body-md font-medium truncate">Drum Bus Rough Mix</span>
+<span class="font-label-sm text-label-sm opacity-70">WAV • 48kHz</span>
+</div>
+</div>
+<span class="font-data-display text-data-display text-on-surface-variant pl-2">05:08</span>
+</div>
+</section>
+</main>
+<!-- BottomNavBar (JSON Sourced & Strictly Applied) -->
+<nav class="fixed bottom-0 w-full z-50 flex justify-around items-center px-4 pb-2 bg-surface dark:bg-surface docked full-width h-20 flat no shadows border-t border-surface-bright/30">
+<!-- Active Tab: Player -->
+<button class="flex flex-col items-center justify-center bg-secondary-container dark:bg-secondary-container text-on-secondary-container dark:text-on-secondary-container rounded-full px-5 py-1 scale-95 active:scale-90 transition-transform">
+<span class="material-symbols-outlined text-[24px]" data-icon="library_music" style="font-variation-settings: 'FILL' 1;">library_music</span>
+<span class="font-label-lg text-label-lg mt-1 font-bold">Player</span>
+</button>
+<!-- Inactive Tab: AutoEQ -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-5 py-1 hover:bg-surface-variant dark:hover:bg-surface-variant rounded-full scale-95 active:scale-90 transition-transform duration-200">
+<span class="material-symbols-outlined text-[24px]" data-icon="graphic_eq">graphic_eq</span>
+<span class="font-label-lg text-label-lg mt-1">AutoEQ</span>
+</button>
+<!-- Inactive Tab: OPRA -->
+<button class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant px-5 py-1 hover:bg-surface-variant dark:hover:bg-surface-variant rounded-full scale-95 active:scale-90 transition-transform duration-200">
+<span class="material-symbols-outlined text-[24px]" data-icon="tune">tune</span>
+<span class="font-label-lg text-label-lg mt-1">OPRA</span>
+</button>
+</nav>
+<!-- Minimal script for basic interactions if needed, kept lightweight -->
+<script>
+        // Optional: Add subtle interaction feedback to buttons
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('touchstart', () => {}, {passive: true}); // Enable active states on iOS
+        });
+    </script>
+</body></html>

@@ -11,6 +11,9 @@ package com.coreline.auraltune.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -42,7 +45,8 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -52,16 +56,21 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -72,9 +81,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.coreline.autoeq.model.CatalogState
@@ -85,6 +98,8 @@ import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.PlaybackUiState
 import com.coreline.auraltune.audio.TrackInfo
 import com.coreline.auraltune.audio.eq.GraphicEqBands
+import kotlin.math.abs
+import kotlin.math.sin
 
 /** Bottom-nav destinations. Player is home. */
 private enum class AppTab { PLAYER, AUTOEQ, OPRA }
@@ -117,10 +132,10 @@ fun AuralTuneApp() {
         val playback by musicController.state.collectAsState()
         val opraDetail by vm.opraDetail.collectAsState()
         val opraSyncState by vm.opraSyncState.collectAsState()
-        // 적용된 보정의 소스 배지(AutoEQ/OPRA) — 프로파일이 있을 때만. 상태카드·플레이어·미니에 공통 사용.
-        val selectedProfile by vm.selectedProfile.collectAsState()
+        // '현재 사용중'(실제 엔진 적용) 프로파일 = 활성 provider의 선택. 플레이어·미니 배지에 사용.
+        val activeProfile by vm.activeProfile.collectAsState()
         val correctionProvider by vm.correctionProvider.collectAsState()
-        val correctionSource: String? = selectedProfile?.let {
+        val correctionSource: String? = activeProfile?.let {
             if (correctionProvider == "OPRA") "OPRA" else "AutoEQ"
         }
 
@@ -156,8 +171,14 @@ fun AuralTuneApp() {
         }
 
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.background,
             topBar = {
-                TopAppBar(title = {
+                CenterAlignedTopAppBar(
+                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        titleContentColor = MaterialTheme.colorScheme.primary,
+                    ),
+                    title = {
                     Text(
                         when (selectedTab) {
                             AppTab.PLAYER -> stringResource(R.string.app_name)
@@ -179,24 +200,47 @@ fun AuralTuneApp() {
                             onExpand = { selectedTab = AppTab.PLAYER },
                         )
                     }
-                    NavigationBar {
+                    val navColors = NavigationBarItemDefaults.colors(
+                        selectedIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                        selectedTextColor = MaterialTheme.colorScheme.secondaryContainer,
+                        indicatorColor = MaterialTheme.colorScheme.secondaryContainer,
+                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    NavigationBar(
+                        containerColor = MaterialTheme.colorScheme.background,
+                        contentColor = MaterialTheme.colorScheme.onSurface,
+                    ) {
                         NavigationBarItem(
                             selected = selectedTab == AppTab.PLAYER,
                             onClick = { selectedTab = AppTab.PLAYER },
                             icon = { Icon(Icons.Default.LibraryMusic, contentDescription = null) },
                             label = { Text(stringResource(R.string.tab_player)) },
+                            colors = navColors,
                         )
                         NavigationBarItem(
                             selected = selectedTab == AppTab.AUTOEQ,
                             onClick = { selectedTab = AppTab.AUTOEQ },
-                            icon = { Icon(Icons.Default.GraphicEq, contentDescription = null) },
+                            icon = {
+                                // 현재 적용 중인 보정 소스 탭에만 점 배지를 표시 — '서 있는 탭'이 아니라
+                                // '실제 적용 중인 소스'를 한눈에 알 수 있게 한다.
+                                BadgedBox(badge = { if (correctionSource == "AutoEQ") Badge() }) {
+                                    Icon(Icons.Default.GraphicEq, contentDescription = null)
+                                }
+                            },
                             label = { Text("AutoEQ") },
+                            colors = navColors,
                         )
                         NavigationBarItem(
                             selected = selectedTab == AppTab.OPRA,
                             onClick = { selectedTab = AppTab.OPRA },
-                            icon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                            icon = {
+                                BadgedBox(badge = { if (correctionSource == "OPRA") Badge() }) {
+                                    Icon(Icons.Default.Tune, contentDescription = null)
+                                }
+                            },
                             label = { Text("OPRA") },
+                            colors = navColors,
                         )
                     }
                 }
@@ -204,7 +248,7 @@ fun AuralTuneApp() {
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         ) { padding ->
             when (selectedTab) {
-                AppTab.PLAYER -> PlayerScreen(vm, playback, padding, playerListState, correctionSource, selectedProfile?.name)
+                AppTab.PLAYER -> PlayerScreen(vm, playback, padding, playerListState, correctionSource, activeProfile?.name)
                 AppTab.AUTOEQ -> CorrectionScreen(vm, isOpra = false, contentPadding = padding, listState = autoEqListState, openUrl = openUrl, opraSyncState = opraSyncState, sourceLabel = correctionSource)
                 AppTab.OPRA -> CorrectionScreen(vm, isOpra = true, contentPadding = padding, listState = opraListState, openUrl = openUrl, opraSyncState = opraSyncState, sourceLabel = correctionSource)
             }
@@ -238,8 +282,10 @@ private fun PlayerScreen(
     ) {
         // Now-playing + seek + transport.
         item {
-            Card(modifier = Modifier.fillMaxWidth()) {
+            AuralTunePanel(elevated = true) {
                 Column(modifier = Modifier.padding(16.dp)) {
+                    AudioWaveformPreview()
+                    Spacer(Modifier.height(16.dp))
                     Text(
                         text = if (state.hasMedia) state.title else stringResource(R.string.player_no_media),
                         style = MaterialTheme.typography.titleMedium,
@@ -267,6 +313,14 @@ private fun PlayerScreen(
                         value = if (dur > 0) (state.positionMs.toFloat() / dur).coerceIn(0f, 1f) else 0f,
                         onValueChange = { f -> if (dur > 0) musicController.seekTo((f * dur).toLong()) },
                         enabled = state.hasMedia && dur > 0,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MaterialTheme.colorScheme.secondaryContainer,
+                            activeTrackColor = MaterialTheme.colorScheme.secondaryContainer,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            disabledThumbColor = MaterialTheme.colorScheme.outlineVariant,
+                            disabledActiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
+                            disabledInactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        ),
                     )
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Text(formatTime(state.positionMs), style = MaterialTheme.typography.labelSmall)
@@ -360,6 +414,44 @@ private fun PlayerScreen(
     }
 }
 
+@Composable
+private fun AudioWaveformPreview(modifier: Modifier = Modifier) {
+    val accent = MaterialTheme.colorScheme.secondaryContainer
+    val rail = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+    val slot = MaterialTheme.colorScheme.surfaceContainerLowest
+    Canvas(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(156.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(slot)
+            .padding(horizontal = 18.dp, vertical = 18.dp),
+    ) {
+        val centerY = size.height / 2f
+        drawLine(
+            color = rail,
+            start = Offset(0f, centerY),
+            end = Offset(size.width, centerY),
+            strokeWidth = 1.5f,
+        )
+        val bars = 72
+        for (i in 0 until bars) {
+            val t = i.toFloat() / (bars - 1)
+            val x = size.width * t
+            val envelope = 0.35f + 0.65f * sin(t * Math.PI).toFloat()
+            val wave = abs(sin(i * 0.41f) + 0.45f * sin(i * 0.93f))
+            val amp = (size.height * (0.08f + 0.30f * wave * envelope)).coerceAtMost(size.height * 0.43f)
+            val alpha = 0.34f + 0.50f * envelope
+            drawLine(
+                color = accent.copy(alpha = alpha),
+                start = Offset(x, centerY - amp),
+                end = Offset(x, centerY + amp),
+                strokeWidth = 2f,
+            )
+        }
+    }
+}
+
 /** One queue row. Current track is highlighted; the X removes it. */
 @Composable
 private fun QueueRow(
@@ -370,7 +462,12 @@ private fun QueueRow(
     onRemove: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 8.dp, vertical = 10.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MaterialTheme.shapes.medium)
+            .background(if (isCurrent) MaterialTheme.colorScheme.surfaceContainerHighest else Color.Transparent)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
@@ -380,14 +477,15 @@ private fun QueueRow(
                 else -> Icons.Default.MusicNote
             },
             contentDescription = null,
-            tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.width(12.dp))
         Text(
             text = track.title,
             style = MaterialTheme.typography.bodyMedium,
-            color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            color = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
         IconButton(onClick = onRemove) {
@@ -405,13 +503,28 @@ private fun MiniPlayer(
     onNext: () -> Unit,
     onExpand: () -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth().clickable(onClick = onExpand)) {
-        HorizontalDivider()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .clickable(onClick = onExpand),
+    ) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         // 진행바(얇게) — durationMs 있을 때만.
         if (state.durationMs > 0) {
             val frac = (state.positionMs.toFloat() / state.durationMs).coerceIn(0f, 1f)
-            Box(modifier = Modifier.fillMaxWidth().height(2.dp)) {
-                Box(modifier = Modifier.fillMaxWidth(frac).height(2.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(frac)
+                        .height(2.dp)
+                        .background(MaterialTheme.colorScheme.secondaryContainer),
+                )
             }
         }
         Row(
@@ -429,6 +542,7 @@ private fun MiniPlayer(
                 text = state.title.ifBlank { stringResource(R.string.player_no_media) },
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
             IconButton(onClick = onPlayPause) {
@@ -447,6 +561,37 @@ private fun MiniPlayer(
 // ── AutoEQ / OPRA correction tab (shared; differs only in the search source) ───────
 
 @Composable
+private fun sourceTextFieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = MaterialTheme.colorScheme.onSurface,
+    unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+    focusedPlaceholderColor = MaterialTheme.colorScheme.outline,
+    unfocusedPlaceholderColor = MaterialTheme.colorScheme.outline,
+    focusedTrailingIconColor = MaterialTheme.colorScheme.secondaryContainer,
+    unfocusedTrailingIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+    cursorColor = MaterialTheme.colorScheme.secondaryContainer,
+    focusedBorderColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.72f),
+    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f),
+    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+)
+
+@Composable
+private fun sourceFilledButtonColors() = ButtonDefaults.buttonColors(
+    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.18f),
+    contentColor = MaterialTheme.colorScheme.secondaryContainer,
+    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+)
+
+@Composable
+private fun sourceOutlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
+    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+    contentColor = MaterialTheme.colorScheme.onSurface,
+    disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+    disabledContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+)
+
+@Composable
 private fun CorrectionScreen(
     vm: AutoEqViewModel,
     isOpra: Boolean,
@@ -456,7 +601,11 @@ private fun CorrectionScreen(
     opraSyncState: com.coreline.auraltune.opra.model.OpraSyncState?,
     sourceLabel: String?,
 ) {
-    val selected by vm.selectedProfile.collectAsState()
+    // 탭별 독립 선택: 이 탭(isOpra)의 선택만 표시·그래프에 사용.
+    val selectedAutoEq by vm.selectedAutoEqProfile.collectAsState()
+    val selectedOpra by vm.selectedOpraProfile.collectAsState()
+    val selected = if (isOpra) selectedOpra else selectedAutoEq
+    val recentOpra by vm.recentOpraProfiles.collectAsState()
     val listenMode by vm.listenMode.collectAsState()
     val autoEqAudible = listenMode != ListenMode.ORIGINAL
     val preampEnabled by vm.preampEnabled.collectAsState()
@@ -493,6 +642,8 @@ private fun CorrectionScreen(
                     placeholder = { Text(stringResource(R.string.search_placeholder)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = sourceTextFieldColors(),
                     trailingIcon = {
                         if (query.isNotEmpty()) {
                             IconButton(onClick = { vm.onQueryChanged("") }) {
@@ -507,7 +658,13 @@ private fun CorrectionScreen(
                 item {
                     var expanded by remember { mutableStateOf(false) }
                     Box(modifier = Modifier.fillMaxWidth()) {
-                        OutlinedButton(onClick = { expanded = true }, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+                            colors = sourceOutlinedButtonColors(),
+                        ) {
                             Text(selected?.name?.let { "프로파일: $it" } ?: "프로파일 빠른 선택 ▾")
                         }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -530,14 +687,28 @@ private fun CorrectionScreen(
                     Button(
                         onClick = { importLauncher.launch(arrayOf("text/plain", "application/octet-stream", "*/*")) },
                         modifier = Modifier.weight(1f),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = sourceFilledButtonColors(),
                     ) { Text(stringResource(R.string.import_button)) }
-                    OutlinedButton(onClick = vm::clearNetworkCache, modifier = Modifier.weight(1f)) {
+                    OutlinedButton(
+                        onClick = vm::clearNetworkCache,
+                        modifier = Modifier.weight(1f),
+                        shape = MaterialTheme.shapes.medium,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+                        colors = sourceOutlinedButtonColors(),
+                    ) {
                         Text(stringResource(R.string.clear_cache_button))
                     }
                 }
             }
             item {
-                OutlinedButton(onClick = { vm.checkProfileUpdates() }, modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = { vm.checkProfileUpdates() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)),
+                    colors = sourceOutlinedButtonColors(),
+                ) {
                     Text("프로파일 업데이트 확인")
                 }
             }
@@ -580,6 +751,8 @@ private fun CorrectionScreen(
                     placeholder = { Text("OPRA 헤드폰 검색…") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = sourceTextFieldColors(),
                     trailingIcon = {
                         if (opraQuery.isNotEmpty()) {
                             IconButton(onClick = { vm.onOpraQueryChanged("") }) {
@@ -595,7 +768,34 @@ private fun CorrectionScreen(
                     onClick = { vm.refreshOpra() },
                     enabled = !opraRefreshing,
                     modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)),
+                    colors = sourceOutlinedButtonColors(),
                 ) { Text(if (opraRefreshing) "OPRA 갱신 중…" else "OPRA 데이터 갱신") }
+            }
+            if (recentOpra.isNotEmpty()) {
+                item {
+                    var expanded by remember { mutableStateOf(false) }
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { expanded = true },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = MaterialTheme.shapes.medium,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+                            colors = sourceOutlinedButtonColors(),
+                        ) {
+                            Text(selectedOpra?.name?.let { "프로파일: $it" } ?: "OPRA 빠른 선택 ▾")
+                        }
+                        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                            recentOpra.forEach { recent ->
+                                DropdownMenuItem(
+                                    text = { Text(recent.name) },
+                                    onClick = { expanded = false; vm.selectOpraRecent(recent) },
+                                )
+                            }
+                        }
+                    }
+                }
             }
             if (opraResults.isEmpty()) {
                 item {
@@ -623,8 +823,19 @@ private fun CorrectionScreen(
             }
         }
 
-        // ── 공유 보정 영역 ── (선택 프로파일 + 비교 모드를 검색/결과 아래·그래픽 EQ 바로 위에 배치)
-        item { StatusCard(profile = selected, sourceLabel = sourceLabel, onClear = vm::clearProfile) }
+        // ── 탭별 선택 프로파일 + 비교 모드 (검색/결과 아래·그래픽 EQ 바로 위) ──
+        item {
+            val thisTabSource = if (isOpra) "OPRA" else "AutoEQ"
+            // 이 탭의 선택이 곧 '현재 사용중'(엔진 적용)인가 = 활성 소스가 이 탭인가.
+            val isInUse = sourceLabel == thisTabSource
+            StatusCard(
+                profile = selected,
+                sourceLabel = if (selected != null) thisTabSource else null,
+                onClear = if (isOpra) vm::clearOpraSelection else vm::clearAutoEqSelection,
+                inUse = isInUse,
+                onUse = if (isOpra) vm::useOpraSelection else vm::useAutoEqSelection,
+            )
+        }
         item {
             val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
             val subtitle = when (listenMode) {
@@ -702,7 +913,7 @@ private fun OpraCatalogRow(
                 text = entry.productName,
                 style = MaterialTheme.typography.bodyLarge,
                 color = when {
-                    isSelected -> MaterialTheme.colorScheme.primary
+                    isSelected -> MaterialTheme.colorScheme.secondaryContainer
                     !entry.isSupported -> MaterialTheme.colorScheme.onSurfaceVariant
                     else -> MaterialTheme.colorScheme.onSurface
                 },

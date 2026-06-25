@@ -2,25 +2,33 @@
 // Small, self-contained Compose Material3 building blocks used by the AuralTune MVP screen.
 package com.coreline.auraltune.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
@@ -28,7 +36,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,7 +50,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.coreline.audio.AudioEngine
 import com.coreline.autoeq.model.AutoEqCatalogEntry
@@ -53,17 +65,39 @@ import com.coreline.auraltune.opra.model.OpraEqProfile
  * container color, OPRA the tertiary container — distinct at a glance.
  */
 @Composable
+fun AuralTunePanel(
+    modifier: Modifier = Modifier,
+    elevated: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (elevated) 6.dp else 0.dp),
+    ) {
+        Column(content = content)
+    }
+}
+
+@Composable
 fun SourceBadge(label: String, modifier: Modifier = Modifier) {
     val isOpra = label.equals("OPRA", ignoreCase = true)
-    Text(
-        text = label,
-        style = MaterialTheme.typography.labelSmall,
-        color = if (isOpra) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(if (isOpra) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer)
-            .padding(horizontal = 8.dp, vertical = 2.dp),
-    )
+    val accent = if (isOpra) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.secondaryContainer
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(50),
+        color = accent.copy(alpha = 0.13f),
+        contentColor = accent,
+        border = BorderStroke(1.dp, accent.copy(alpha = 0.45f)),
+    ) {
+        Text(
+            text = label.uppercase(),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        )
+    }
 }
 
 /**
@@ -76,11 +110,10 @@ fun StatusCard(
     sourceLabel: String?,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
+    inUse: Boolean = false,
+    onUse: (() -> Unit)? = null,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
+    AuralTunePanel(modifier = modifier, elevated = profile != null) {
         Column(modifier = Modifier.padding(16.dp)) {
             if (profile == null) {
                 Text(
@@ -89,6 +122,20 @@ fun StatusCard(
                 )
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceContainerLowest),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GraphicEq,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondaryContainer,
+                        )
+                    }
+                    Spacer(Modifier.width(14.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         sourceLabel?.let {
                             SourceBadge(it)
@@ -97,6 +144,8 @@ fun StatusCard(
                         Text(
                             text = profile.name,
                             style = MaterialTheme.typography.titleMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         profile.measuredBy?.takeIf { it.isNotBlank() }?.let { source ->
                             Text(
@@ -111,6 +160,28 @@ fun StatusCard(
                             imageVector = Icons.Default.Close,
                             contentDescription = stringResource(R.string.clear_selection),
                         )
+                    }
+                }
+            }
+            // 탭별 선택 모델: 이 탭 선택이 '현재 사용중'(엔진 적용)이면 표시, 아니면 '지금 사용' 버튼.
+            if (profile != null) {
+                Spacer(Modifier.height(10.dp))
+                if (inUse) {
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.18f),
+                        contentColor = MaterialTheme.colorScheme.secondaryContainer,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f)),
+                    ) {
+                        Text(
+                            text = "● 현재 사용중",
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                        )
+                    }
+                } else if (onUse != null) {
+                    Button(onClick = onUse, shape = MaterialTheme.shapes.medium) {
+                        Text("지금 사용")
                     }
                 }
             }
@@ -129,17 +200,22 @@ fun ListenModeBar(
     onSelect: (ListenMode) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+    AuralTunePanel(modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Text(
                 text = stringResource(R.string.listen_mode_title),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.outline,
             )
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 ModeButton(stringResource(R.string.listen_mode_original), mode == ListenMode.ORIGINAL) { onSelect(ListenMode.ORIGINAL) }
                 ModeButton(stringResource(R.string.listen_mode_autoeq), mode == ListenMode.AUTOEQ) { onSelect(ListenMode.AUTOEQ) }
                 ModeButton(stringResource(R.string.listen_mode_user), mode == ListenMode.USER) { onSelect(ListenMode.USER) }
@@ -158,9 +234,39 @@ fun ListenModeBar(
 @Composable
 private fun RowScope.ModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
     if (selected) {
-        Button(onClick = onClick, modifier = Modifier.weight(1f)) { Text(label) }
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.weight(1f),
+            shape = MaterialTheme.shapes.small,
+            border = BorderStroke(2.dp, MaterialTheme.colorScheme.secondaryContainer),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+            ),
+        ) {
+            Text(
+                text = label.uppercase(),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
     } else {
-        OutlinedButton(onClick = onClick, modifier = Modifier.weight(1f)) { Text(label) }
+        OutlinedButton(
+            onClick = onClick,
+            modifier = Modifier.weight(1f),
+            shape = MaterialTheme.shapes.small,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+            ),
+        ) {
+            Text(
+                text = label.uppercase(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+            )
+        }
     }
 }
 
@@ -171,10 +277,7 @@ fun AutoEqPreampCard(
     onTogglePreamp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-    ) {
+    AuralTunePanel(modifier = modifier) {
         Column(modifier = Modifier.padding(16.dp)) {
             ToggleRow(
                 label = stringResource(R.string.preamp_toggle),
@@ -197,38 +300,52 @@ fun CatalogEntryRow(
     isFavorite: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        border = BorderStroke(
+            1.dp,
+            if (isSelected) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.24f),
+        ),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = entry.name,
-                style = MaterialTheme.typography.bodyLarge,
-                color = if (isSelected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurface,
-            )
-            entry.measuredBy.takeIf { it.isNotBlank() }?.let {
+        Row(
+            modifier = Modifier
+                .clickable(onClick = onClick)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    text = entry.name,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = if (isSelected) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                entry.measuredBy.takeIf { it.isNotBlank() }?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            IconButton(onClick = onToggleFavorite) {
+                Icon(
+                    imageVector = if (isFavorite) Icons.Default.Star else Icons.Outlined.Star,
+                    contentDescription = stringResource(R.string.favorite_toggle),
+                    tint = if (isFavorite) MaterialTheme.colorScheme.secondaryContainer
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
-        IconButton(onClick = onToggleFavorite) {
-            Icon(
-                imageVector = if (isFavorite) Icons.Default.Star else Icons.Outlined.Star,
-                contentDescription = stringResource(R.string.favorite_toggle),
-                tint = if (isFavorite) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
     }
-    HorizontalDivider()
 }
 
 /**
@@ -243,7 +360,7 @@ fun DiagnosticsCard(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Card(modifier = modifier.fillMaxWidth()) {
+    AuralTunePanel(modifier = modifier) {
         Column {
             Row(
                 modifier = Modifier
@@ -322,7 +439,15 @@ private fun ToggleRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MaterialTheme.colorScheme.secondaryContainer,
+                checkedTrackColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.22f),
+                checkedBorderColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f),
+            ),
+        )
     }
 }
 
@@ -332,11 +457,17 @@ private fun ToggleRow(
  */
 @Composable
 fun EmptyStateMessage(message: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(24.dp),
-        horizontalArrangement = Arrangement.Center,
-    ) {
-        Text(message, style = MaterialTheme.typography.bodyMedium)
+    AuralTunePanel {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(24.dp),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -375,7 +506,7 @@ fun AboutCard(
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    Card(modifier = modifier.fillMaxWidth()) {
+    AuralTunePanel(modifier = modifier) {
         Column {
             Row(
                 modifier = Modifier
