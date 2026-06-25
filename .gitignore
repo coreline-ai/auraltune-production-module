@@ -20,3 +20,5 @@ node_modules/
 
 # adb screenshots / uiautomator dumps from manual QA
 _shots/
+# uiautomator window hierarchy dumps (debug byproduct; screenshots dir is image-only)
+screenshots/**/*.xml
