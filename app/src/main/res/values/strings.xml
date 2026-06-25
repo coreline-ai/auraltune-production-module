@@ -11,6 +11,7 @@
     <string name="search_placeholder">Search headphones…</string>
     <string name="no_results">No headphones found</string>
     <string name="search_prompt">Type a model name to search, or pick from the quick-select above</string>
+    <string name="clear_search">Clear search</string>
 
     <!-- Status card -->
     <string name="no_correction_active">No correction active</string>

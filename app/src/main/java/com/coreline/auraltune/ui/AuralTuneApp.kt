@@ -35,6 +35,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -223,23 +227,6 @@ private fun AuralTuneScreen(
             }
         }
 
-        // 비교 모드(원음/AutoEQ/내 설정) — 상단 존. 기존 킬스위치 + correction 토글을 대체.
-        item {
-            val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
-            val subtitle = when (listenMode) {
-                ListenMode.ORIGINAL -> stringResource(R.string.listen_mode_hint_original)
-                ListenMode.AUTOEQ -> stringResource(R.string.listen_mode_hint_autoeq)
-                ListenMode.USER ->
-                    if (userBands) stringResource(R.string.listen_mode_hint_user)
-                    else stringResource(R.string.listen_mode_hint_user_flat)
-            }
-            ListenModeBar(
-                mode = listenMode,
-                subtitle = subtitle,
-                onSelect = vm::setListenMode,
-            )
-        }
-
         // 소스 탭: AutoEQ(기존) / OPRA(비교). 적용된 보정 UI(상태/토글/그래프)는 탭 아래 공유.
         item {
             TabRow(selectedTabIndex = selectedSourceTab) {
@@ -256,6 +243,30 @@ private fun AuralTuneScreen(
             }
         }
 
+        // 상태 카드 + 비교 모드 — 탭 직후, 검색 결과 목록 위에 배치. 결과가 길어도 핵심(즉시 A/B 비교)이
+        // 아래로 밀리지 않고 항상 상단에 노출되도록(P0).
+        item {
+            StatusCard(
+                profile = selected,
+                onClear = vm::clearProfile,
+            )
+        }
+        item {
+            val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
+            val subtitle = when (listenMode) {
+                ListenMode.ORIGINAL -> stringResource(R.string.listen_mode_hint_original)
+                ListenMode.AUTOEQ -> stringResource(R.string.listen_mode_hint_autoeq)
+                ListenMode.USER ->
+                    if (userBands) stringResource(R.string.listen_mode_hint_user)
+                    else stringResource(R.string.listen_mode_hint_user_flat)
+            }
+            ListenModeBar(
+                mode = listenMode,
+                subtitle = subtitle,
+                onSelect = vm::setListenMode,
+            )
+        }
+
         if (selectedSourceTab == 0) {
         // Search field
         item {
@@ -265,6 +276,13 @@ private fun AuralTuneScreen(
                 placeholder = { Text(stringResource(R.string.search_placeholder)) },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { vm.onQueryChanged("") }) {
+                            Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
         }
@@ -382,6 +400,13 @@ private fun AuralTuneScreen(
                     placeholder = { Text("OPRA 헤드폰 검색…") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    trailingIcon = {
+                        if (opraQuery.isNotEmpty()) {
+                            IconButton(onClick = { vm.onOpraQueryChanged("") }) {
+                                Icon(Icons.Default.Close, contentDescription = stringResource(R.string.clear_search))
+                            }
+                        }
+                    },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -420,22 +445,6 @@ private fun AuralTuneScreen(
             }
         }
 
-        // 상태 카드(프로파일명 + 닫기) — AutoEQ 토글 바로 위로 이동(그래픽 EQ 위에 프로파일+토글을 묶음).
-        item {
-            StatusCard(
-                profile = selected,
-                onClear = vm::clearProfile,
-            )
-        }
-
-        // AutoEQ preamp 토글 — 그래픽 EQ 바로 위. (보정 on/off는 비교 모드 바로 이동)
-        item {
-            AutoEqPreampCard(
-                preampEnabled = preampEnabled,
-                onTogglePreamp = vm::togglePreamp,
-            )
-        }
-
         // 그래픽 EQ (20밴드, Manual chain) — AutoEQ 프로파일과 독립·합성.
         item {
             GraphicEqCard(
@@ -456,6 +465,14 @@ private fun AuralTuneScreen(
                 onSavePreset = vm::saveGraphicEqPreset,
                 onLoadPreset = vm::loadGraphicEqPreset,
                 onDeletePreset = vm::deleteGraphicEqPreset,
+            )
+        }
+
+        // AutoEQ preamp 토글 — 그래픽 EQ 아래로 이동. (보정 on/off는 비교 모드에서)
+        item {
+            AutoEqPreampCard(
+                preampEnabled = preampEnabled,
+                onTogglePreamp = vm::togglePreamp,
             )
         }
 
