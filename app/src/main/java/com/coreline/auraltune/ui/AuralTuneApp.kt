@@ -117,6 +117,12 @@ fun AuralTuneApp() {
         val playback by musicController.state.collectAsState()
         val opraDetail by vm.opraDetail.collectAsState()
         val opraSyncState by vm.opraSyncState.collectAsState()
+        // 적용된 보정의 소스 배지(AutoEQ/OPRA) — 프로파일이 있을 때만. 상태카드·플레이어·미니에 공통 사용.
+        val selectedProfile by vm.selectedProfile.collectAsState()
+        val correctionProvider by vm.correctionProvider.collectAsState()
+        val correctionSource: String? = selectedProfile?.let {
+            if (correctionProvider == "OPRA") "OPRA" else "AutoEQ"
+        }
 
         // 외부 링크(라이선스/측정 출처) 열기 — ActivityNotFound 가드 + Toast.
         val linkCtx = LocalContext.current
@@ -167,6 +173,7 @@ fun AuralTuneApp() {
                     if (selectedTab != AppTab.PLAYER && playback.hasMedia) {
                         MiniPlayer(
                             state = playback,
+                            correctionSource = correctionSource,
                             onPlayPause = musicController::togglePlayPause,
                             onNext = musicController::next,
                             onExpand = { selectedTab = AppTab.PLAYER },
@@ -197,9 +204,9 @@ fun AuralTuneApp() {
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         ) { padding ->
             when (selectedTab) {
-                AppTab.PLAYER -> PlayerScreen(vm, playback, padding, playerListState)
-                AppTab.AUTOEQ -> CorrectionScreen(vm, isOpra = false, contentPadding = padding, listState = autoEqListState, openUrl = openUrl, opraSyncState = opraSyncState)
-                AppTab.OPRA -> CorrectionScreen(vm, isOpra = true, contentPadding = padding, listState = opraListState, openUrl = openUrl, opraSyncState = opraSyncState)
+                AppTab.PLAYER -> PlayerScreen(vm, playback, padding, playerListState, correctionSource, selectedProfile?.name)
+                AppTab.AUTOEQ -> CorrectionScreen(vm, isOpra = false, contentPadding = padding, listState = autoEqListState, openUrl = openUrl, opraSyncState = opraSyncState, sourceLabel = correctionSource)
+                AppTab.OPRA -> CorrectionScreen(vm, isOpra = true, contentPadding = padding, listState = opraListState, openUrl = openUrl, opraSyncState = opraSyncState, sourceLabel = correctionSource)
             }
         }
     }
@@ -213,6 +220,8 @@ private fun PlayerScreen(
     state: PlaybackUiState,
     contentPadding: PaddingValues,
     listState: LazyListState,
+    correctionSource: String?,
+    correctionName: String?,
 ) {
     val musicController = vm.musicController
     val ctx = LocalContext.current
@@ -236,6 +245,22 @@ private fun PlayerScreen(
                         style = MaterialTheme.typography.titleMedium,
                         maxLines = 2,
                     )
+                    // 재생 중인 음원에 걸린 보정(소스 배지 + 프로파일명). 보정 없으면 숨김.
+                    if (correctionSource != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SourceBadge(correctionSource)
+                            correctionName?.let {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = it,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
                     Spacer(Modifier.height(12.dp))
                     val dur = state.durationMs
                     Slider(
@@ -375,6 +400,7 @@ private fun QueueRow(
 @Composable
 private fun MiniPlayer(
     state: PlaybackUiState,
+    correctionSource: String?,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onExpand: () -> Unit,
@@ -394,6 +420,11 @@ private fun MiniPlayer(
         ) {
             Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.width(10.dp))
+            // 현재 보정 소스 배지(있을 때) — 듣는 중에도 무엇이 걸렸는지 한눈에.
+            correctionSource?.let {
+                SourceBadge(it)
+                Spacer(Modifier.width(8.dp))
+            }
             Text(
                 text = state.title.ifBlank { stringResource(R.string.player_no_media) },
                 style = MaterialTheme.typography.bodyMedium,
@@ -423,6 +454,7 @@ private fun CorrectionScreen(
     listState: LazyListState,
     openUrl: (String) -> Unit,
     opraSyncState: com.coreline.auraltune.opra.model.OpraSyncState?,
+    sourceLabel: String?,
 ) {
     val selected by vm.selectedProfile.collectAsState()
     val listenMode by vm.listenMode.collectAsState()
@@ -592,7 +624,7 @@ private fun CorrectionScreen(
         }
 
         // ── 공유 보정 영역 ── (선택 프로파일 + 비교 모드를 검색/결과 아래·그래픽 EQ 바로 위에 배치)
-        item { StatusCard(profile = selected, onClear = vm::clearProfile) }
+        item { StatusCard(profile = selected, sourceLabel = sourceLabel, onClear = vm::clearProfile) }
         item {
             val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
             val subtitle = when (listenMode) {

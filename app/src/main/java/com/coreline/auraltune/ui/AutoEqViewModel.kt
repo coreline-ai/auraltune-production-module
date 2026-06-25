@@ -105,6 +105,12 @@ class AutoEqViewModel(
     private val _selectedProfile = MutableStateFlow<AutoEqProfile?>(null)
     val selectedProfile: StateFlow<AutoEqProfile?> = _selectedProfile.asStateFlow()
 
+    /** 현재 적용된 보정의 소스(provider) — 상태카드/플레이어의 AutoEQ/OPRA 배지용. */
+    val correctionProvider: StateFlow<String> =
+        settings.activeCorrectionProvider.stateIn(
+            viewModelScope, SharingStarted.Eagerly, SettingsStore.PROVIDER_AUTOEQ,
+        )
+
     /**
      * A/B/C 청취 비교 모드 — 킬스위치 + AutoEQ correction 토글을 대체한다.
      *   ORIGINAL = EQ 미적용(순수 패스스루), AUTOEQ = 프로파일만, USER = 프로파일 + 그래픽 EQ.

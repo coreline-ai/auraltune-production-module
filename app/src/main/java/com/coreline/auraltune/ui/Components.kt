@@ -2,6 +2,7 @@
 // Small, self-contained Compose Material3 building blocks used by the AuralTune MVP screen.
 package com.coreline.auraltune.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandLess
@@ -36,6 +38,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
@@ -46,13 +49,31 @@ import com.coreline.auraltune.R
 import com.coreline.auraltune.opra.model.OpraEqProfile
 
 /**
- * Card showing the currently active AutoEQ profile (if any). The correction / preamp
- * toggles live in [AutoEqToggleCard] (placed above the Graphic EQ).
- * Use empty-state copy from strings.xml when [profile] is null.
+ * Small pill showing which data source the active correction came from. AutoEQ uses the primary
+ * container color, OPRA the tertiary container — distinct at a glance.
+ */
+@Composable
+fun SourceBadge(label: String, modifier: Modifier = Modifier) {
+    val isOpra = label.equals("OPRA", ignoreCase = true)
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = if (isOpra) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (isOpra) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.primaryContainer)
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    )
+}
+
+/**
+ * Card showing the currently active correction profile (if any) + its [sourceLabel] badge
+ * (AutoEQ / OPRA). Use empty-state copy from strings.xml when [profile] is null.
  */
 @Composable
 fun StatusCard(
     profile: AutoEqProfile?,
+    sourceLabel: String?,
     onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -69,6 +90,10 @@ fun StatusCard(
             } else {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(modifier = Modifier.weight(1f)) {
+                        sourceLabel?.let {
+                            SourceBadge(it)
+                            Spacer(Modifier.height(6.dp))
+                        }
                         Text(
                             text = profile.name,
                             style = MaterialTheme.typography.titleMedium,

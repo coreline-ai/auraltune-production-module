@@ -31,7 +31,7 @@
 
     <!-- Status card -->
     <string name="no_correction_active">No correction active</string>
-    <string name="import_button">Import ParametricEQ.txt</string>
+    <string name="import_button">Import EQ</string>
     <string name="correction_toggle">AutoEQ correction</string>
     <string name="preamp_toggle">AutoEQ preamp</string>
     <string name="clear_selection">Clear selection</string>
