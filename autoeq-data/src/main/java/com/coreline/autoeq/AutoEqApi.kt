@@ -7,9 +7,11 @@ import com.coreline.autoeq.model.ParseResult
 import com.coreline.autoeq.repository.AutoEqRepository
 import com.coreline.autoeq.search.AutoEqSearchEngine
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.onEach
 
 /**
@@ -63,6 +65,9 @@ class AutoEqApi(
                 searchEngine.setCatalog(state.entries)
             }
         }
+            // 카탈로그 병합 + 검색 인덱스 빌드(6k건 정렬/소문자화)를 메인 스레드 밖으로 — 콜드스타트 jank 제거.
+            // searchEngine은 @Volatile 인덱스 원자 스왑이라 Default에서 setCatalog ↔ Main search 동시 안전.
+            .flowOn(Dispatchers.Default)
     }
 
     /** Search the current catalog. Returns empty results until [observe] has emitted Loaded. */

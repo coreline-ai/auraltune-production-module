@@ -82,6 +82,15 @@ class DeviceAutoEqManager(
     private var resolveJob: Job? = null
 
     /**
+     * Provider-aware reapply hook. When the active correction provider is OPRA, route changes must
+     * reapply the OPRA profile — NOT the AutoEq [selectedProfileId] (which would clobber the user's
+     * OPRA choice). The ViewModel injects this resolver (active OPRA id → engine-model profile);
+     * null means "no OPRA profile" → the eligible route is cleared. Set before [start].
+     */
+    @Volatile
+    var opraReapplyProvider: (suspend () -> AutoEqProfile?)? = null
+
+    /**
      * The currently-applied DeviceKey hash, exposed for diagnostics UI / logs.
      * Always returns a one-way hash — never the raw key.
      */
@@ -288,6 +297,20 @@ class DeviceAutoEqManager(
             // Resolve saved selection for this device. Cancel any in-flight resolve.
             resolveJob?.cancel()
             resolveJob = coroutineScope.launch {
+                // Provider-aware: when OPRA is the active provider, reapply the OPRA profile on
+                // this (eligible) route instead of the AutoEq selection — otherwise a route change
+                // would overwrite/clear the user's OPRA choice.
+                if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) {
+                    val opra = opraReapplyProvider?.invoke()
+                    currentCoroutineContext().ensureActive()
+                    if (opra != null && opra.validated().filters.isNotEmpty() && lastKey?.raw == key.raw) {
+                        pushToEngine(opra.validated())
+                    } else {
+                        engine.clearAutoEq()
+                    }
+                    return@launch
+                }
+
                 val perDevice = settings.perDeviceSelections.first()
                 val savedId = perDevice[key.raw]?.takeIf { it.isEnabled }?.profileId
                     ?: settings.selectedProfileId.first()

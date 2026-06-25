@@ -24,6 +24,8 @@ import com.coreline.auraltune.opra.model.OpraSyncState
 import com.coreline.auraltune.opra.toAutoEqProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -154,6 +156,9 @@ class AutoEqViewModel(
     private val _opraRefreshing = MutableStateFlow(false)
     val opraRefreshing: StateFlow<Boolean> = _opraRefreshing.asStateFlow()
 
+    /** OPRA refresh/seed 직렬화 — 동시 import 방지 + init/수동 새로고침 경합 해소. */
+    private val opraSyncMutex = Mutex()
+
     /** OPRA 스냅샷 provenance(commit/version/source/license) — About/진단 표시용. */
     private val _opraSyncState = MutableStateFlow<OpraSyncState?>(null)
     val opraSyncState: StateFlow<OpraSyncState?> = _opraSyncState.asStateFlow()
@@ -218,6 +223,12 @@ class AutoEqViewModel(
         )
 
     init {
+        // provider==OPRA일 때 라우트 변경 시 deviceManager가 AutoEQ 선택 대신 OPRA 프로파일을
+        // 재적용하도록 resolver 주입(OPRA 선택 clobber 방지). start() 전에 설정해야 초기 reconcile에 반영.
+        deviceManager.opraReapplyProvider = {
+            val id = settings.activeOpraProfileId.first()
+            if (id != null) opraRepository.resolveById(id)?.toAutoEqProfile() else null
+        }
         // Phase 2: start the device-route manager here (was DisposableEffectClose in the
         // Composable). The manager + engine are now owned by this retained ViewModel, so
         // route detection / sample-rate / saved-profile restore survive rotation.
@@ -238,6 +249,10 @@ class AutoEqViewModel(
         //   - UI selectProfile(entry)             ⇒ delegates to deviceManager directly
         //   - AudioDeviceCallback route change   ⇒ deviceManager reconcile() handles it
         viewModelScope.launch {
+            // 마지막 활성 provider가 OPRA면 아래 OPRA 복원 블록이 담당한다. AutoEQ 복원이 여기서
+            // 프로파일을 적용하면 OPRA 선택을 덮어쓰고(_selectedProfile/엔진), selectedProfileId가
+            // AutoEQ로 남아 이후 reconcile에서 OPRA를 다시 clobber한다 → provider==OPRA면 skip.
+            if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) return@launch
             val savedId = settings.selectedProfileId.first()
             if (savedId == null) {
                 // No saved profile — manager will clear the engine on its first reconcile().
@@ -272,19 +287,22 @@ class AutoEqViewModel(
         // 청취 모드(ORIGINAL/AUTOEQ/USER) + preamp 토글이 엔진 상태를 결정한다.
         // ORIGINAL = AutoEQ·매뉴얼·preamp 전부 off(순수 원음), AUTOEQ = 프로파일만,
         // USER = 프로파일 + (비평탄) 그래픽 EQ. 매뉴얼 enable 규칙은 applyGraphicEq와 동일.
+        // _bandGains를 combine 소스로 포함 → 복원 전 빈 게인으로 manual을 잘못 끄는 init 경합 제거,
+        // 동시에 manual on/off의 단독 소유자가 되어 applyGraphicEq와의 이중 writer 경합도 없앤다.
+        // (engine.setAutoEqEnabled는 값 불변이면 early-return이라 밴드 틱마다 호출돼도 무해.)
         viewModelScope.launch {
-            combine(listenMode, preampEnabled) { mode, preamp -> mode to preamp }
-                .collect { (mode, preamp) ->
-                    val auto = mode != ListenMode.ORIGINAL
-                    val manual = mode == ListenMode.USER &&
-                        GraphicEqBands.toSpecs(_bandGains.value).isNotEmpty()
-                    // 비교용 전환이지만 클릭 방지를 위해 0.5s 크로스페이드 사용(immediate=false).
-                    engine.setAutoEqEnabled(auto, immediate = false)
-                    engine.setManualEqEnabled(manual)
-                    engine.setAutoEqPreampEnabled(auto && preamp)
-                    // 원음 청취 중엔 백그라운드 카탈로그/프로파일 fetch를 멈춘다(기존 킬스위치 의미 계승).
-                    api.repository.setKillSwitchEngaged(mode == ListenMode.ORIGINAL)
-                }
+            combine(listenMode, preampEnabled, _bandGains) { mode, preamp, gains ->
+                Triple(mode, preamp, gains)
+            }.collect { (mode, preamp, gains) ->
+                val auto = mode != ListenMode.ORIGINAL
+                val manual = mode == ListenMode.USER && GraphicEqBands.toSpecs(gains).isNotEmpty()
+                // 비교용 전환이지만 클릭 방지를 위해 0.5s 크로스페이드 사용(immediate=false).
+                engine.setAutoEqEnabled(auto, immediate = false)
+                engine.setManualEqEnabled(manual)
+                engine.setAutoEqPreampEnabled(auto && preamp)
+                // 원음 청취 중엔 백그라운드 카탈로그/프로파일 fetch를 멈춘다(기존 킬스위치 의미 계승).
+                api.repository.setKillSwitchEngaged(mode == ListenMode.ORIGINAL)
+            }
         }
 
         // P1-5: keep the LRU profile cache from evicting whatever the user is
@@ -451,8 +469,8 @@ class AutoEqViewModel(
             gainsDB = FloatArray(specs.size) { specs[it].gainDb.toFloat() },
             qFactors = FloatArray(specs.size) { specs[it].q.toFloat() },
         )
-        // 매뉴얼 체인은 '내 설정'(USER) 모드에서 비평탄 밴드가 있을 때만 on (combine과 동일 규칙).
-        engine.setManualEqEnabled(specs.isNotEmpty() && listenMode.value == ListenMode.USER)
+        // manual on/off enable은 combine(listenMode+_bandGains)이 단독 소유 — 여기선 값만 push해
+        // 이중 writer 경합을 없앤다(값은 항상 push, enable은 combine이 결정).
     }
 
     /** Phase 6 / P3-C: current native sample rate for the diagnostics card. */
@@ -515,23 +533,25 @@ class AutoEqViewModel(
      * About 카드가 stale/null commit을 보이지 않게 함). [_opraRefreshing]을 잡아 OPRA 탭이
      * 로딩 상태("불러오는 중…")를 보이게 한다 — 번들 import(압축해제+파싱+Room 삽입)는 수초 걸림.
      * [notify]=false면 스낵바 없이 조용히 seed(앱 첫 실행 자동 import — 백그라운드 시드).
-     * 진행 중이면 재진입을 막아 중복 import를 방지한다.
+     * [opraSyncMutex]로 직렬화 — 비원자적 check-then-set 대신 동시 import를 원천 차단하고,
+     * init 자동 import 중 사용자가 새로고침해도 무음 드롭 없이 뒤이어 실행된다(스피너 유지).
      */
     private suspend fun syncOpra(notify: Boolean) {
-        if (_opraRefreshing.value) return
-        _opraRefreshing.value = true
-        try {
-            val result = withContext(Dispatchers.IO) { opraRepository.refresh() }
-            _opraSyncState.value = opraRepository.syncState()
-            if (notify) {
-                _importMessage.value = when (result) {
-                    is OpraSyncResult.NoChange -> "OPRA: 최신 상태"
-                    is OpraSyncResult.Updated -> "OPRA 갱신됨 (제품 ${result.products}, 프로파일 ${result.profiles})"
-                    is OpraSyncResult.Failed -> "OPRA 갱신 실패: ${result.reason}"
+        opraSyncMutex.withLock {
+            _opraRefreshing.value = true
+            try {
+                val result = withContext(Dispatchers.IO) { opraRepository.refresh() }
+                _opraSyncState.value = opraRepository.syncState()
+                if (notify) {
+                    _importMessage.value = when (result) {
+                        is OpraSyncResult.NoChange -> "OPRA: 최신 상태"
+                        is OpraSyncResult.Updated -> "OPRA 갱신됨 (제품 ${result.products}, 프로파일 ${result.profiles})"
+                        is OpraSyncResult.Failed -> "OPRA 갱신 실패: ${result.reason}"
+                    }
                 }
+            } finally {
+                _opraRefreshing.value = false
             }
-        } finally {
-            _opraRefreshing.value = false
         }
     }
 
