@@ -299,6 +299,43 @@ void testHighPassFilterTypeResponseSensible() {
     std::printf("PASS testHighPassFilterTypeResponseSensible (b0=%.6f)\n", expectedB0);
 }
 
+// Test 9b (P1 regression): a MANUAL high-pass must KEEP its type across a sample-rate
+// change. updateSampleRate() recomputes every coefficient via writeAllCoeffsInto(); a
+// prior bug rebuilt the manual chain as peaking-only, so a high-pass (gain ignored)
+// silently collapsed to a unity peaking (impulse b0 == 1.0, i.e. no filtering). Verify
+// the impulse b0 matches the high-pass formula at the NEW rate, and is clearly != 1.0.
+void testManualHighPassSurvivesSampleRateChange() {
+    AuralTuneEQEngine eng(48000.0);
+
+    const float freqs[1] = {80.0f};
+    const float gains[1] = {0.0f};                                     // ignored by high-pass
+    const float qs[1]    = {static_cast<float>(1.0 / std::sqrt(2.0))}; // Butterworth
+    const int   types[1] = {static_cast<int>(EqFilterType::HighPass)};
+    assert(eng.updateManualEq(freqs, gains, qs, types, 1) == 0);
+    eng.setManualEqEnabled(true);
+
+    // Change the decoded stream rate — this re-derives the manual coeffs at 44.1k.
+    eng.updateSampleRate(44100);
+
+    // Fresh impulse (clean delay state) → first output sample == manual high-pass b0.
+    std::vector<float> buf(kFrames * 2, 0.0f);
+    buf[0] = 1.0f;
+    buf[1] = 1.0f;
+    assert(eng.process(buf.data(), kFrames) == 0);
+    assert(allFinite(buf.data(), kFrames));
+
+    const double omega = 2.0 * M_PI * 80.0 / 44100.0;
+    const double sinW  = std::sin(omega);
+    const double cosW  = std::cos(omega);
+    const double alpha = sinW / (2.0 * (1.0 / std::sqrt(2.0)));
+    const double expectedB0 = (1.0 + cosW) / 2.0 / (1.0 + alpha);  // RBJ high-pass b0
+    assert(std::fabs(static_cast<double>(buf[0]) - expectedB0) < 1e-5);
+    // A collapsed peaking(gain 0) would be unity → b0 == 1.0. Guard against that.
+    assert(std::fabs(static_cast<double>(buf[0]) - 1.0) > 1e-3);
+
+    std::printf("PASS testManualHighPassSurvivesSampleRateChange (b0=%.6f)\n", expectedB0);
+}
+
 // Test 10c (Stage D): Loudness Equalizer auto-leveler — engine integration.
 //   - Default: chain disabled, identity passthrough
 //   - Enable + low-amplitude input: gain ramp over many callbacks should
@@ -455,6 +492,7 @@ int main() {
     testDiagnosticsAppliedGenerationAndCount();
     testAppliedSnapshotConsistency();
     testHighPassFilterTypeResponseSensible();
+    testManualHighPassSurvivesSampleRateChange();
     testHighPassMixedWithPeaking();
     testLoudnessCompensationEngineIntegration();
     testLoudnessEqualizerEngineIntegration();

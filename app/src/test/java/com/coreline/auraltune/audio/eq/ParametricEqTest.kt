@@ -78,7 +78,7 @@ class ParametricEqTest {
         val b = ParametricBand(
             id = "x", type = 7, freqHz = 99_999f, gainDb = 999f, q = 999f,
         ).normalized()
-        assertEquals(3, b.type)                                  // clamped to HIGH_PASS id
+        assertEquals(0, b.type)                                  // unknown id → PEAKING fallback
         assertEquals(ParametricBand.MAX_FREQ_HZ, b.freqHz)
         assertEquals(ParametricBand.MAX_GAIN_DB, b.gainDb)
         assertEquals(ParametricBand.MAX_Q, b.q)

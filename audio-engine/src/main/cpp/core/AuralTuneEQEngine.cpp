@@ -313,18 +313,11 @@ void AuralTuneEQEngine::sweepRetireQueue() {
 }
 
 void AuralTuneEQEngine::writeAllCoeffsInto(EngineSnapshot& dst) const {
-    // Manual chain — peaking only, no pre-warp (user-driven for current rate).
+    // Manual chain — type-dispatched, no pre-warp (user-driven for current rate).
+    // Uses the same helper as updateManualEq so a sample-rate change preserves
+    // each band's type (high-pass/shelf no longer collapse to peaking).
     for (int i = 0; i < manualActiveCount_; ++i) {
-        const auto& p = manualParams_[i];
-        if (p.frequency <= 0.0f ||
-            p.frequency >= static_cast<float>(currentRate_ / 2.0)) {
-            dst.manualCoeffs[i] = BiquadCoeffs::unity();
-        } else {
-            dst.manualCoeffs[i] = peakingCoeffs(static_cast<double>(p.frequency),
-                                                p.gainDB,
-                                                static_cast<double>(p.q),
-                                                currentRate_);
-        }
+        dst.manualCoeffs[i] = manualCoeffFor(manualParams_[i]);
     }
     for (int i = manualActiveCount_; i < kMaxManualFilters; ++i) {
         dst.manualCoeffs[i] = BiquadCoeffs::unity();
@@ -473,30 +466,7 @@ int AuralTuneEQEngine::updateManualEq(const float* frequencies,
     slot->requestDelayReset = false;
 
     for (int i = 0; i < count; ++i) {
-        const auto& p = manualParams_[i];
-        const double f = static_cast<double>(p.frequency);
-        const double q = static_cast<double>(p.q);
-        if (p.frequency <= 0.0f ||
-            p.frequency >= static_cast<float>(currentRate_ / 2.0)) {
-            // Manual filters are specified at the CURRENT device rate (no profile
-            // pre-warp). Dispatch by type; HighPass ignores gain (RBJ cookbook).
-            slot->manualCoeffs[i] = BiquadCoeffs::unity();
-        } else {
-            switch (p.type) {
-                case EqFilterType::Peaking:
-                    slot->manualCoeffs[i] = peakingCoeffs(f, p.gainDB, q, currentRate_);
-                    break;
-                case EqFilterType::LowShelf:
-                    slot->manualCoeffs[i] = lowShelfCoeffs(f, p.gainDB, q, currentRate_);
-                    break;
-                case EqFilterType::HighShelf:
-                    slot->manualCoeffs[i] = highShelfCoeffs(f, p.gainDB, q, currentRate_);
-                    break;
-                case EqFilterType::HighPass:
-                    slot->manualCoeffs[i] = highPassCoeffs(f, q, currentRate_);
-                    break;
-            }
-        }
+        slot->manualCoeffs[i] = manualCoeffFor(manualParams_[i]);
     }
     for (int i = count; i < kMaxManualFilters; ++i) {
         slot->manualCoeffs[i] = BiquadCoeffs::unity();
@@ -504,6 +474,24 @@ int AuralTuneEQEngine::updateManualEq(const float* frequencies,
 
     publishSnapshot(slot);
     return 0;
+}
+
+// Manual filters are specified at the CURRENT device rate (no profile pre-warp).
+// Dispatch by type; HighPass ignores gain (RBJ cookbook). Out-of-range freq → unity.
+BiquadCoeffs AuralTuneEQEngine::manualCoeffFor(const ManualParams& p) const {
+    if (p.frequency <= 0.0f ||
+        p.frequency >= static_cast<float>(currentRate_ / 2.0)) {
+        return BiquadCoeffs::unity();
+    }
+    const double f = static_cast<double>(p.frequency);
+    const double q = static_cast<double>(p.q);
+    switch (p.type) {
+        case EqFilterType::Peaking:   return peakingCoeffs(f, p.gainDB, q, currentRate_);
+        case EqFilterType::LowShelf:  return lowShelfCoeffs(f, p.gainDB, q, currentRate_);
+        case EqFilterType::HighShelf: return highShelfCoeffs(f, p.gainDB, q, currentRate_);
+        case EqFilterType::HighPass:  return highPassCoeffs(f, q, currentRate_);
+    }
+    return BiquadCoeffs::unity();  // unreachable (type validated in updateManualEq)
 }
 
 void AuralTuneEQEngine::setAutoEqEnabled(bool e, bool immediate) {

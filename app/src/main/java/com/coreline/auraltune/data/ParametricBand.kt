@@ -41,7 +41,10 @@ data class ParametricBand(
 
     /** Clamp every field into a valid, engine-safe range. */
     fun normalized(): ParametricBand = copy(
-        type = type.coerceIn(0, 3),
+        // Unknown/corrupt type ids fall back to PEAKING (a no-op at 0 dB), matching
+        // biquadTypeFromNativeId. coerceIn(0,3) would map e.g. 99 -> HIGH_PASS, silently
+        // cutting bass — never the safe default for unrecognized data.
+        type = if (type in 0..3) type else 0,
         freqHz = if (freqHz.isFinite()) freqHz.coerceIn(MIN_FREQ_HZ, MAX_FREQ_HZ) else DEFAULT_FREQ_HZ,
         gainDb = if (gainDb.isFinite()) gainDb.coerceIn(-MAX_GAIN_DB, MAX_GAIN_DB) else 0f,
         q = if (q.isFinite()) q.coerceIn(MIN_Q, MAX_Q) else DEFAULT_Q,

@@ -361,6 +361,13 @@ private:
         float gainDB      = 0.0f;
         float q           = 1.0f;
     };
+
+    // Resolve a manual filter's coefficients at the CURRENT device rate, dispatching by
+    // type (peaking / low-shelf / high-shelf / high-pass) with a freq/Nyquist guard
+    // (unity if out of range). Shared by updateManualEq() and writeAllCoeffsInto() so a
+    // sample-rate change recomputes WITH the stored type instead of collapsing to peaking.
+    BiquadCoeffs manualCoeffFor(const ManualParams& p) const;
+
     std::array<ManualParams, kMaxManualFilters> manualParams_{};
     int manualActiveCount_ = 0;
 
