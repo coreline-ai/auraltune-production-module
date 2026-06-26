@@ -32,6 +32,7 @@ class OpraJsonlParserTest {
 
         val p = r.profiles[0]
         assertTrue(p.isSupported)
+        assertEquals("Pud Vogue", p.profileName)
         assertEquals(2, p.filters.size)
         assertEquals(OpraFilterType.PEAKING, p.filters[0].type)
         assertEquals(OpraFilterType.HIGH_SHELF, p.filters[1].type)
@@ -41,6 +42,16 @@ class OpraJsonlParserTest {
         assertEquals("Vogue", e.productName)
         assertEquals("Pud", e.vendorName)
         assertTrue(e.isSupported)
+    }
+
+    @Test
+    fun profileName_prefersJoinedHeadphoneNameOverEqDetails() {
+        val eq =
+            """{"type":"eq","id":"pud:vogue::note","data":{"author":"A","details":"Measured by Someone","type":"parametric_eq","parameters":{"gain_db":0,"bands":[{"type":"peak_dip","frequency":1000,"gain_db":2,"q":1}]},"product_id":"pud::vogue"}}"""
+
+        val r = parse(vendor, product, eq)
+
+        assertEquals("Pud Vogue", r.profiles.single().profileName)
     }
 
     /** fixture 2: a band the engine cannot realize (low_pass) excludes the whole profile. */

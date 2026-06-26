@@ -9,6 +9,9 @@
 
 package com.coreline.auraltune.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -89,6 +93,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -100,6 +105,7 @@ import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.PlaybackUiState
 import com.coreline.auraltune.audio.TrackInfo
+import com.coreline.auraltune.audio.eq.EqMode
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 import kotlinx.coroutines.flow.StateFlow
 
@@ -158,6 +164,32 @@ fun AuralTuneApp() {
         }
 
         // 탭 전환에도 스크롤 위치 보존 — AuralTuneApp 스코프에서 hoist(탭 콘텐츠만 dispose됨).
+        val playerPicker = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenMultipleDocuments(),
+        ) { uris -> if (!uris.isNullOrEmpty()) musicController.addToQueue(uris) }
+        var bluetoothPermissionGranted by remember {
+            mutableStateOf(isBluetoothConnectGranted(context))
+        }
+        var bluetoothPermissionDismissed by rememberSaveable { mutableStateOf(false) }
+        val bluetoothPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            bluetoothPermissionGranted = granted
+            bluetoothPermissionDismissed = true
+        }
+        val showBluetoothPermissionNotice =
+            Build.VERSION.SDK_INT >= 31 && !bluetoothPermissionGranted && !bluetoothPermissionDismissed
+        val openPlayerPicker: () -> Unit = {
+            try {
+                playerPicker.launch(arrayOf("audio/*"))
+            } catch (e: android.content.ActivityNotFoundException) {
+                if (BuildConfig.DEBUG) android.util.Log.w("MusicPlay", "no SAF picker", e)
+                android.widget.Toast.makeText(
+                    context, context.getString(R.string.saf_unavailable), android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+
         val playerListState = rememberLazyListState()
         val autoEqListState = rememberLazyListState()
         val opraListState = rememberLazyListState()
@@ -171,7 +203,6 @@ fun AuralTuneApp() {
                 onDismiss = { vm.dismissOpraDetail() },
             )
         }
-
         Scaffold(
             containerColor = MaterialTheme.colorScheme.background,
             topBar = {
@@ -184,11 +215,20 @@ fun AuralTuneApp() {
                     Text(
                         when (selectedTab) {
                             AppTab.PLAYER -> stringResource(R.string.app_name)
-                            AppTab.AUTOEQ -> stringResource(R.string.app_name) + " · AutoEQ"
-                            AppTab.OPRA -> stringResource(R.string.app_name) + " · OPRA"
+                            AppTab.AUTOEQ -> stringResource(
+                                R.string.app_title_with_source,
+                                stringResource(R.string.app_name),
+                                stringResource(R.string.tab_autoeq),
+                            )
+                            AppTab.OPRA -> stringResource(
+                                R.string.app_title_with_source,
+                                stringResource(R.string.app_name),
+                                stringResource(R.string.tab_opra),
+                            )
                         },
                     )
-                })
+                    },
+                )
             },
             bottomBar = {
                 Column {
@@ -216,7 +256,12 @@ fun AuralTuneApp() {
                         NavigationBarItem(
                             selected = selectedTab == AppTab.PLAYER,
                             onClick = { selectedTab = AppTab.PLAYER },
-                            icon = { Icon(Icons.Default.LibraryMusic, contentDescription = null) },
+                            icon = {
+                                Icon(
+                                    Icons.Default.LibraryMusic,
+                                    contentDescription = stringResource(R.string.tab_player),
+                                )
+                            },
                             label = { Text(stringResource(R.string.tab_player)) },
                             colors = navColors,
                         )
@@ -227,10 +272,13 @@ fun AuralTuneApp() {
                                 // 현재 적용 중인 보정 소스 탭에만 점 배지를 표시 — '서 있는 탭'이 아니라
                                 // '실제 적용 중인 소스'를 한눈에 알 수 있게 한다.
                                 BadgedBox(badge = { if (correctionSource == "AutoEQ") Badge() }) {
-                                    Icon(Icons.Default.GraphicEq, contentDescription = null)
+                                    Icon(
+                                        Icons.Default.GraphicEq,
+                                        contentDescription = stringResource(R.string.tab_autoeq),
+                                    )
                                 }
                             },
-                            label = { Text("AutoEQ") },
+                            label = { Text(stringResource(R.string.tab_autoeq)) },
                             colors = navColors,
                         )
                         NavigationBarItem(
@@ -238,10 +286,13 @@ fun AuralTuneApp() {
                             onClick = { selectedTab = AppTab.OPRA },
                             icon = {
                                 BadgedBox(badge = { if (correctionSource == "OPRA") Badge() }) {
-                                    Icon(Icons.Default.Tune, contentDescription = null)
+                                    Icon(
+                                        Icons.Default.Tune,
+                                        contentDescription = stringResource(R.string.tab_opra),
+                                    )
                                 }
                             },
-                            label = { Text("OPRA") },
+                            label = { Text(stringResource(R.string.tab_opra)) },
                             colors = navColors,
                         )
                     }
@@ -250,7 +301,22 @@ fun AuralTuneApp() {
             snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         ) { padding ->
             when (selectedTab) {
-                AppTab.PLAYER -> PlayerScreen(vm, playback, padding, playerListState, correctionSource, activeProfile?.name)
+                AppTab.PLAYER -> PlayerScreen(
+                    vm = vm,
+                    state = playback,
+                    contentPadding = padding,
+                    listState = playerListState,
+                    correctionSource = correctionSource,
+                    correctionName = activeProfile?.name,
+                    onAddFiles = openPlayerPicker,
+                    showBluetoothPermissionNotice = showBluetoothPermissionNotice,
+                    onRequestBluetoothPermission = {
+                        if (Build.VERSION.SDK_INT >= 31) {
+                            bluetoothPermissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                        }
+                    },
+                    onDismissBluetoothPermissionNotice = { bluetoothPermissionDismissed = true },
+                )
                 AppTab.AUTOEQ -> CorrectionScreen(vm, isOpra = false, contentPadding = padding, listState = autoEqListState, openUrl = openUrl, opraSyncState = opraSyncState, sourceLabel = correctionSource)
                 AppTab.OPRA -> CorrectionScreen(vm, isOpra = true, contentPadding = padding, listState = opraListState, openUrl = openUrl, opraSyncState = opraSyncState, sourceLabel = correctionSource)
             }
@@ -268,14 +334,14 @@ private fun PlayerScreen(
     listState: LazyListState,
     correctionSource: String?,
     correctionName: String?,
+    onAddFiles: () -> Unit,
+    showBluetoothPermissionNotice: Boolean,
+    onRequestBluetoothPermission: () -> Unit,
+    onDismissBluetoothPermissionNotice: () -> Unit,
 ) {
     val musicController = vm.musicController
-    val ctx = LocalContext.current
-    // 멀티 파일 선택 → 큐에 추가(첫 추가면 자동 재생).
-    val picker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris -> if (!uris.isNullOrEmpty()) musicController.addToQueue(uris) }
-
+    val listenMode by vm.listenMode.collectAsState()
+    val preampEnabled by vm.preampEnabled.collectAsState()
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
         state = listState,
@@ -286,7 +352,10 @@ private fun PlayerScreen(
         item {
             AuralTunePanel(elevated = true) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    SpectrumVisualizer(musicController.spectrum)
+                    SpectrumVisualizer(
+                        spectrum = musicController.spectrum,
+                        formatLabel = state.audioFormatLabel(),
+                    )
                     Spacer(Modifier.height(16.dp))
                     Text(
                         text = if (state.hasMedia) state.title else stringResource(R.string.player_no_media),
@@ -347,6 +416,7 @@ private fun PlayerScreen(
                             Icon(
                                 if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = stringResource(if (state.isPlaying) R.string.player_pause else R.string.player_play),
+                                modifier = Modifier.size(34.dp),
                             )
                         }
                         Spacer(Modifier.width(16.dp))
@@ -358,51 +428,34 @@ private fun PlayerScreen(
             }
         }
 
-        // File actions.
-        item {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
-                    onClick = {
-                        try {
-                            picker.launch(arrayOf("audio/*"))
-                        } catch (e: android.content.ActivityNotFoundException) {
-                            if (BuildConfig.DEBUG) android.util.Log.w("MusicPlay", "no SAF picker", e)
-                            android.widget.Toast.makeText(
-                                ctx, ctx.getString(R.string.saf_unavailable), android.widget.Toast.LENGTH_LONG,
-                            ).show()
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null)
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.player_add_files))
-                }
-                OutlinedButton(
-                    onClick = { musicController.clearQueue() },
-                    enabled = state.hasMedia,
-                    modifier = Modifier.weight(1f),
-                ) { Text(stringResource(R.string.player_clear_queue)) }
-                // 디버그 전용: MediaStore 첫 곡을 큐에 추가(자동 테스트용).
-                if (BuildConfig.DEBUG) {
-                    OutlinedButton(onClick = {
-                        DebugSupport.firstPlayableUri(ctx)?.let { musicController.addToQueue(listOf(it)) }
-                    }) { Text("첫곡") }
-                }
+        if (showBluetoothPermissionNotice) {
+            item {
+                BluetoothPermissionNotice(
+                    onRequest = onRequestBluetoothPermission,
+                    onDismiss = onDismissBluetoothPermissionNotice,
+                )
             }
         }
 
+        // Player correction controls.
+        item {
+            PlayerCorrectionControls(
+                mode = listenMode,
+                preampEnabled = preampEnabled,
+                onModeSelect = vm::setListenMode,
+                onTogglePreamp = vm::togglePreamp,
+            )
+        }
         // Queue / playlist.
+        item {
+            PlaylistHeader(
+                count = state.queue.size,
+                onAddFiles = onAddFiles,
+            )
+        }
         if (state.queue.isEmpty()) {
             item { EmptyStateMessage(stringResource(R.string.player_queue_empty)) }
         } else {
-            item {
-                Text(
-                    text = stringResource(R.string.player_queue_title, state.queue.size),
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.padding(top = 4.dp),
-                )
-            }
             itemsIndexed(state.queue, key = { i, t -> "$i:${t.uri}" }) { index, track ->
                 QueueRow(
                     track = track,
@@ -418,33 +471,265 @@ private fun PlayerScreen(
 
 /** 재생 중 음원의 실시간 주파수 스펙트럼을 막대로 표시(아래→위). post-EQ 실제 값. */
 @Composable
-private fun SpectrumVisualizer(spectrum: StateFlow<FloatArray>, modifier: Modifier = Modifier) {
+private fun SpectrumVisualizer(
+    spectrum: StateFlow<FloatArray>,
+    formatLabel: String?,
+    modifier: Modifier = Modifier,
+) {
     val levels by spectrum.collectAsState()
     val accent = MaterialTheme.colorScheme.secondaryContainer
     val slot = MaterialTheme.colorScheme.surfaceContainerLowest
-    Canvas(
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .height(156.dp)
             .clip(MaterialTheme.shapes.medium)
-            .background(slot)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+            .background(slot),
     ) {
-        val n = levels.size
-        if (n == 0) return@Canvas
-        val gap = 3.dp.toPx()
-        val barW = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1f)
-        val minH = 2.dp.toPx()
-        val radius = CornerRadius(barW / 2f, barW / 2f)
-        for (i in 0 until n) {
-            val lvl = levels[i].coerceIn(0f, 1f)
-            val h = (size.height * lvl).coerceIn(minH, size.height)
-            val x = i * (barW + gap)
-            drawRoundRect(
-                color = accent.copy(alpha = 0.40f + 0.60f * lvl),
-                topLeft = Offset(x, size.height - h),
-                size = Size(barW, h),
-                cornerRadius = radius,
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+        ) {
+            val n = levels.size
+            if (n == 0) return@Canvas
+            val gap = 3.dp.toPx()
+            val barW = ((size.width - gap * (n - 1)) / n).coerceAtLeast(1f)
+            val minH = 2.dp.toPx()
+            val radius = CornerRadius(barW / 2f, barW / 2f)
+            for (i in 0 until n) {
+                val lvl = levels[i].coerceIn(0f, 1f)
+                val h = (size.height * lvl).coerceIn(minH, size.height)
+                val x = i * (barW + gap)
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.40f + 0.60f * lvl),
+                    topLeft = Offset(x, size.height - h),
+                    size = Size(barW, h),
+                    cornerRadius = radius,
+                )
+            }
+        }
+        formatLabel?.let {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(10.dp)
+                    .clip(MaterialTheme.shapes.small)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.88f))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+    }
+}
+
+private fun PlaybackUiState.audioFormatLabel(): String? {
+    val bitDepth = audioBitDepth ?: return null
+    val sampleRate = audioSampleRateHz ?: return null
+    if (!hasMedia || bitDepth <= 0 || sampleRate <= 0) return null
+    return "$bitDepth/$sampleRate"
+}
+
+@Composable
+private fun PlayerCorrectionControls(
+    mode: ListenMode,
+    preampEnabled: Boolean,
+    onModeSelect: (ListenMode) -> Unit,
+    onTogglePreamp: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AuralTunePanel(modifier = modifier) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(MaterialTheme.shapes.medium)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                PlayerListenModeButton(stringResource(R.string.player_mode_original), mode == ListenMode.ORIGINAL) {
+                    onModeSelect(ListenMode.ORIGINAL)
+                }
+                PlayerListenModeButton(stringResource(R.string.player_mode_eq_applied), mode == ListenMode.AUTOEQ) {
+                    onModeSelect(ListenMode.AUTOEQ)
+                }
+                PlayerListenModeButton(stringResource(R.string.player_mode_custom), mode == ListenMode.USER) {
+                    onModeSelect(ListenMode.USER)
+                }
+            }
+
+            PlayerPreampButton(
+                enabled = preampEnabled,
+                onClick = onTogglePreamp,
+                modifier = Modifier.width(104.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun RowScope.PlayerListenModeButton(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.weight(1f).height(36.dp),
+        shape = MaterialTheme.shapes.small,
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (selected) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
+        ),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerHigh
+            },
+            contentColor = if (selected) {
+                MaterialTheme.colorScheme.onSecondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        ),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun PlayerPreampButton(
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(44.dp),
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(
+            if (enabled) 2.dp else 1.dp,
+            if (enabled) MaterialTheme.colorScheme.secondaryContainer
+            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+        ),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (enabled) {
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.22f)
+            } else {
+                MaterialTheme.colorScheme.surfaceContainerLow
+            },
+            contentColor = if (enabled) {
+                MaterialTheme.colorScheme.secondaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+        ),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.player_preamp),
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (enabled) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun BluetoothPermissionNotice(
+    onRequest: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AuralTunePanel(modifier = modifier) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.bt_permission_title),
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.secondaryContainer,
+            )
+            Text(
+                text = stringResource(R.string.bt_permission_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = onRequest,
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = sourceFilledButtonColors(),
+                ) {
+                    Text(stringResource(R.string.bt_permission_allow))
+                }
+                OutlinedButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    shape = MaterialTheme.shapes.medium,
+                    colors = sourceOutlinedButtonColors(),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.58f)),
+                ) {
+                    Text(stringResource(R.string.bt_permission_later))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistHeader(
+    count: Int,
+    onAddFiles: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = stringResource(R.string.player_queue_title, count),
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .clip(MaterialTheme.shapes.medium)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .clickable(onClick = onAddFiles),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = stringResource(R.string.player_add_files),
+                tint = MaterialTheme.colorScheme.secondaryContainer,
             )
         }
     }
@@ -474,7 +759,13 @@ private fun QueueRow(
                 isCurrent -> Icons.Default.PlayArrow
                 else -> Icons.Default.MusicNote
             },
-            contentDescription = null,
+            contentDescription = stringResource(
+                when {
+                    isCurrent && isPlaying -> R.string.player_queue_item_playing
+                    isCurrent -> R.string.player_queue_item_selected
+                    else -> R.string.player_queue_item_idle
+                },
+            ),
             tint = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(Modifier.width(12.dp))
@@ -529,7 +820,11 @@ private fun MiniPlayer(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+            Icon(
+                Icons.Default.MusicNote,
+                contentDescription = stringResource(R.string.player_queue_item_idle),
+                tint = MaterialTheme.colorScheme.primary,
+            )
             Spacer(Modifier.width(10.dp))
             // 현재 보정 소스 배지(있을 때) — 듣는 중에도 무엇이 걸렸는지 한눈에.
             correctionSource?.let {
@@ -620,7 +915,7 @@ private fun ProfilePickerButtonContent(
         Spacer(Modifier.width(10.dp))
         Icon(
             imageVector = Icons.Default.ExpandMore,
-            contentDescription = null,
+            contentDescription = stringResource(R.string.profile_picker_expand),
             tint = MaterialTheme.colorScheme.secondaryContainer,
         )
     }
@@ -649,6 +944,12 @@ private fun CorrectionScreen(
     val selectedPresetId by vm.selectedGraphicEqPresetId.collectAsState()
     val gainLimit by vm.gainLimitDb.collectAsState()
     val showPreamp by vm.showPreampOnGraph.collectAsState()
+    val eqMode by vm.eqMode.collectAsState()
+    val qScale by vm.graphicQScale.collectAsState()
+    val parametricBands by vm.parametricBands.collectAsState()
+    val selectedParametricBandId by vm.selectedParametricBandId.collectAsState()
+    val manualSpecs by vm.manualResponseSpecs.collectAsState()
+    val engineRateHz by vm.engineSampleRateHz.collectAsState()
     val diag by vm.diagnostics.collectAsState()
 
     // AutoEQ source
@@ -705,9 +1006,9 @@ private fun CorrectionScreen(
                             colors = sourceOutlinedButtonColors(),
                         ) {
                             ProfilePickerButtonContent(
-                                title = "프로파일 선택",
+                                title = stringResource(R.string.profile_picker_title),
                                 selectedName = selected?.name,
-                                placeholder = "최근 프로파일에서 선택",
+                                placeholder = stringResource(R.string.profile_picker_placeholder),
                             )
                         }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -752,7 +1053,7 @@ private fun CorrectionScreen(
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)),
                     colors = sourceOutlinedButtonColors(),
                 ) {
-                    Text("프로파일 업데이트 확인")
+                    Text(stringResource(R.string.profile_update_check))
                 }
             }
             when (val state = catalog) {
@@ -791,7 +1092,7 @@ private fun CorrectionScreen(
                 OutlinedTextField(
                     value = opraQuery,
                     onValueChange = vm::onOpraQueryChanged,
-                    placeholder = { Text("OPRA 헤드폰 검색…") },
+                    placeholder = { Text(stringResource(R.string.opra_search_placeholder)) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     shape = MaterialTheme.shapes.medium,
@@ -814,7 +1115,12 @@ private fun CorrectionScreen(
                     shape = MaterialTheme.shapes.medium,
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.35f)),
                     colors = sourceOutlinedButtonColors(),
-                ) { Text(if (opraRefreshing) "OPRA 갱신 중…" else "OPRA 데이터 갱신") }
+                ) {
+                    Text(
+                        if (opraRefreshing) stringResource(R.string.opra_refreshing)
+                        else stringResource(R.string.opra_refresh),
+                    )
+                }
             }
             if (recentOpra.isNotEmpty()) {
                 item {
@@ -832,9 +1138,9 @@ private fun CorrectionScreen(
                             colors = sourceOutlinedButtonColors(),
                         ) {
                             ProfilePickerButtonContent(
-                                title = "OPRA 프로파일 선택",
+                                title = stringResource(R.string.opra_profile_picker_title),
                                 selectedName = selectedOpra?.name,
-                                placeholder = "최근 OPRA 프로파일에서 선택",
+                                placeholder = stringResource(R.string.opra_profile_picker_placeholder),
                             )
                         }
                         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
@@ -851,8 +1157,8 @@ private fun CorrectionScreen(
             if (opraResults.isEmpty()) {
                 item {
                     EmptyStateMessage(
-                        if (opraRefreshing) "OPRA 데이터를 불러오는 중…"
-                        else "OPRA 헤드폰을 검색하거나 'OPRA 데이터 갱신'을 누르세요",
+                        if (opraRefreshing) stringResource(R.string.opra_empty_loading)
+                        else stringResource(R.string.opra_empty_prompt),
                     )
                 }
             } else {
@@ -888,7 +1194,8 @@ private fun CorrectionScreen(
             )
         }
         item {
-            val userBands = GraphicEqBands.toSpecs(bandGains).isNotEmpty()
+            // 사용자 EQ가 실제로 소리를 바꾸는지(비평탄)는 현재 모드의 적용 스펙으로 판단.
+            val userBands = manualSpecs.isNotEmpty()
             val subtitle = when (listenMode) {
                 ListenMode.ORIGINAL -> stringResource(R.string.listen_mode_hint_original)
                 ListenMode.AUTOEQ -> stringResource(R.string.listen_mode_hint_autoeq)
@@ -899,23 +1206,47 @@ private fun CorrectionScreen(
             ListenModeBar(mode = listenMode, subtitle = subtitle, onSelect = vm::setListenMode)
         }
         item {
-            GraphicEqCard(
-                bandGains = bandGains,
-                autoEqFilters = if (autoEqAudible) selected?.filters.orEmpty() else emptyList(),
-                presets = eqPresets,
-                selectedPresetId = selectedPresetId,
-                gainLimitDb = gainLimit,
-                preampDb = if (autoEqAudible) selected?.preampDB ?: 0f else 0f,
-                showPreamp = showPreamp,
-                preampApplied = autoEqAudible && preampEnabled,
-                onBandChange = vm::setBandGain,
-                onGainLimitChange = vm::setGainLimit,
-                onToggleShowPreamp = vm::setShowPreampOnGraph,
-                onReset = vm::resetGraphicEq,
-                onSavePreset = vm::saveGraphicEqPreset,
-                onLoadPreset = vm::loadGraphicEqPreset,
-                onDeletePreset = vm::deleteGraphicEqPreset,
-            )
+            EqModeToggle(mode = eqMode, onSelect = vm::setEqMode)
+        }
+        item {
+            val autoFilters = if (autoEqAudible) selected?.filters.orEmpty() else emptyList()
+            val preamp = if (autoEqAudible) selected?.preampDB ?: 0f else 0f
+            when (eqMode) {
+                EqMode.GRAPHIC -> GraphicEqCard(
+                    bandGains = bandGains,
+                    autoEqFilters = autoFilters,
+                    presets = eqPresets,
+                    selectedPresetId = selectedPresetId,
+                    gainLimitDb = gainLimit,
+                    qScale = qScale,
+                    sampleRate = engineRateHz.toDouble(),
+                    preampDb = preamp,
+                    showPreamp = showPreamp,
+                    preampApplied = autoEqAudible && preampEnabled,
+                    onBandChange = vm::setBandGain,
+                    onGainLimitChange = vm::setGainLimit,
+                    onQScaleChange = vm::setGraphicQScale,
+                    onToggleShowPreamp = vm::setShowPreampOnGraph,
+                    onReset = vm::resetGraphicEq,
+                    onSavePreset = vm::saveGraphicEqPreset,
+                    onLoadPreset = vm::loadGraphicEqPreset,
+                    onDeletePreset = vm::deleteGraphicEqPreset,
+                )
+                EqMode.PARAMETRIC -> ParametricEqCard(
+                    bands = parametricBands,
+                    selectedId = selectedParametricBandId,
+                    autoEqFilters = autoFilters,
+                    gainLimitDb = gainLimit,
+                    sampleRate = engineRateHz.toDouble(),
+                    onAddBand = vm::addParametricBand,
+                    onSelectBand = vm::selectParametricBand,
+                    onDragBand = { id, f, g -> vm.updateParametricBand(id, freqHz = f, gainDb = g) },
+                    onChangeType = { id, t -> vm.updateParametricBand(id, type = t) },
+                    onChangeQ = { id, q -> vm.updateParametricBand(id, q = q) },
+                    onRemoveBand = vm::removeParametricBand,
+                    onReset = vm::resetParametricEq,
+                )
+            }
         }
         item { AutoEqPreampCard(preampEnabled = preampEnabled, onTogglePreamp = vm::togglePreamp) }
         item {
@@ -975,7 +1306,7 @@ private fun OpraCatalogRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                text = entry.license + (if (!entry.isSupported) " • 적용 불가" else ""),
+                text = entry.license + (if (!entry.isSupported) stringResource(R.string.opra_unsupported_suffix) else ""),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -993,5 +1324,11 @@ private fun queryDisplayName(context: android.content.Context, uri: android.net.
             val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
             if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
         }
-    }.getOrNull() ?: uri.lastPathSegment ?: "Imported profile"
+    }.getOrNull() ?: uri.lastPathSegment ?: context.getString(R.string.imported_profile_fallback)
+}
+
+private fun isBluetoothConnectGranted(context: android.content.Context): Boolean {
+    if (Build.VERSION.SDK_INT < 31) return true
+    return context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) ==
+        PackageManager.PERMISSION_GRANTED
 }

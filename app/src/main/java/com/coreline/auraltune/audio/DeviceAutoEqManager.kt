@@ -23,6 +23,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.coreline.auraltune.BuildConfig
+import com.coreline.auraltune.R
 import com.coreline.audio.AudioEngine
 import com.coreline.autoeq.AutoEqApi
 import com.coreline.autoeq.cache.ImportedProfileStore
@@ -358,8 +359,8 @@ class DeviceAutoEqManager(
         if (savedId.startsWith(ImportedProfileStore.IMPORTED_PREFIX)) {
             return AutoEqCatalogEntry(
                 id = savedId,
-                name = "Imported profile",
-                measuredBy = "Imported",
+                name = context.getString(R.string.imported_profile_fallback),
+                measuredBy = context.getString(R.string.imported_source_label),
                 relativePath = "",
             )
         }

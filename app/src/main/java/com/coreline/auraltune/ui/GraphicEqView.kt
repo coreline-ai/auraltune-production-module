@@ -45,12 +45,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 import com.coreline.auraltune.data.GraphicEqPreset
+import com.coreline.auraltune.R
 import com.coreline.autoeq.model.AutoEqFilter
 
 @Composable
@@ -60,11 +62,14 @@ fun GraphicEqCard(
     presets: List<GraphicEqPreset>,
     selectedPresetId: String?,
     gainLimitDb: Float,
+    qScale: Float,
+    sampleRate: Double,
     preampDb: Float,
     showPreamp: Boolean,
     preampApplied: Boolean,
     onBandChange: (Int, Float) -> Unit,
     onGainLimitChange: (Float) -> Unit,
+    onQScaleChange: (Float) -> Unit,
     onToggleShowPreamp: (Boolean) -> Unit,
     onReset: () -> Unit,
     onSavePreset: (String) -> Unit,
@@ -78,9 +83,8 @@ fun GraphicEqCard(
     AuralTunePanel(modifier = modifier, elevated = true) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // TODO(i18n): 문자열 리소스화
                 Text(
-                    "그래픽 EQ (20밴드)",
+                    stringResource(R.string.graphic_eq_title),
                     modifier = Modifier.fillMaxWidth(),
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -103,11 +107,11 @@ fun GraphicEqCard(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Save,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.graphic_eq_save),
                         modifier = Modifier.size(18.dp),
                     )
                     Spacer(Modifier.width(8.dp))
-                    Text("저장", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(stringResource(R.string.graphic_eq_save), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Box(modifier = Modifier.weight(1f)) {
                     OutlinedButton(
@@ -119,7 +123,7 @@ fun GraphicEqCard(
                         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
                     ) {
                         Text(
-                            selectedName ?: "불러오기 (${presets.size})",
+                            selectedName ?: stringResource(R.string.graphic_eq_load_count, presets.size),
                             modifier = Modifier.weight(1f, fill = false),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -127,20 +131,26 @@ fun GraphicEqCard(
                         Spacer(Modifier.width(6.dp))
                         Icon(
                             imageVector = Icons.Default.ExpandMore,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.graphic_eq_load_menu),
                             modifier = Modifier.size(18.dp),
                         )
                     }
                     DropdownMenu(expanded = presetMenuOpen, onDismissRequest = { presetMenuOpen = false }) {
                         if (presets.isEmpty()) {
-                            DropdownMenuItem(text = { Text("저장된 프리셋 없음") }, onClick = {}, enabled = false)
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.graphic_eq_empty)) },
+                                onClick = {},
+                                enabled = false,
+                            )
                         }
                         presets.forEach { p ->
                             DropdownMenuItem(
                                 text = { Text(p.name) },
                                 onClick = { presetMenuOpen = false; onLoadPreset(p.id) },
                                 trailingIcon = {
-                                    TextButton(onClick = { onDeletePreset(p.id) }) { Text("삭제") }
+                                    TextButton(onClick = { onDeletePreset(p.id) }) {
+                                        Text(stringResource(R.string.graphic_eq_delete))
+                                    }
                                 },
                             )
                         }
@@ -156,10 +166,12 @@ fun GraphicEqCard(
             }
 
             Spacer(Modifier.height(10.dp))
-            // 상단: 합성 응답 그래프(Manual + AutoEQ) + preamp 기준선(점선).
+            // 상단: 합성 응답 그래프(Manual + AutoEQ) + preamp 기준선(점선). 전역 Q 배율 반영.
+            val manualSpecs = remember(bandGains, qScale) { GraphicEqBands.toSpecs(bandGains, qScale) }
             EqGraphView(
-                bandGains = bandGains,
+                manualSpecs = manualSpecs,
                 autoEqFilters = autoEqFilters,
+                sampleRate = sampleRate,
                 preampDb = preampDb,
                 showPreamp = showPreamp,
                 preampApplied = preampApplied,
@@ -181,8 +193,11 @@ fun GraphicEqCard(
                     ),
                 )
                 Text(
-                    if (hasPreamp) "프리앰프 표시 (${String.format("%+.1f", preampDb)} dB)"
-                    else "프리앰프 표시 (프로파일 없음)",
+                    if (hasPreamp) {
+                        stringResource(R.string.graphic_eq_preamp_format, String.format(java.util.Locale.US, "%+.1f", preampDb))
+                    } else {
+                        stringResource(R.string.graphic_eq_preamp_none)
+                    },
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall,
                 )
@@ -209,9 +224,55 @@ fun GraphicEqCard(
                 gainLimitDb = gainLimitDb,
                 onGainLimitChange = onGainLimitChange,
             )
+            Spacer(Modifier.height(12.dp))
+            QScaleSelector(
+                qScale = qScale,
+                onQScaleChange = onQScaleChange,
+            )
         }
     }
 }
+
+/** 전역 Q 배율 선택(넓게/보통/좁게) — 모든 밴드의 종 폭을 동시에 조절. */
+@Composable
+private fun QScaleSelector(
+    qScale: Float,
+    onQScaleChange: (Float) -> Unit,
+) {
+    val selected = GraphicEqBands.snapQScale(qScale)
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            stringResource(R.string.graphic_eq_q_scale),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (opt in GraphicEqBands.Q_SCALE_OPTIONS) {
+                GainLimitButton(
+                    label = qScaleLabel(opt),
+                    selected = opt == selected,
+                    onClick = { onQScaleChange(opt) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+}
+
+/** 0.5 → 넓게, 1.0 → 보통, 2.0 → 좁게. */
+@Composable
+private fun qScaleLabel(scale: Float): String = stringResource(
+    when {
+        scale < 0.75f -> R.string.graphic_eq_q_wide
+        scale > 1.5f -> R.string.graphic_eq_q_narrow
+        else -> R.string.graphic_eq_q_normal
+    },
+)
 
 @Composable
 private fun EqResetButton(onClick: () -> Unit) {
@@ -224,7 +285,7 @@ private fun EqResetButton(onClick: () -> Unit) {
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
     ) {
         Text(
-            text = "리셋",
+            text = stringResource(R.string.graphic_eq_reset),
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Bold,
         )
@@ -232,7 +293,7 @@ private fun EqResetButton(onClick: () -> Unit) {
 }
 
 @Composable
-private fun GainLimitButton(
+internal fun GainLimitButton(
     label: String,
     selected: Boolean,
     onClick: () -> Unit,
@@ -264,7 +325,7 @@ private fun GainLimitSelector(
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
-            "EQ 한계",
+            stringResource(R.string.graphic_eq_limit),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.outline,
         )
@@ -287,7 +348,7 @@ private fun GainLimitSelector(
 }
 
 @Composable
-private fun eqButtonBorder(selected: Boolean) = BorderStroke(
+internal fun eqButtonBorder(selected: Boolean) = BorderStroke(
     width = if (selected) 2.dp else 1.dp,
     color = if (selected) {
         MaterialTheme.colorScheme.secondaryContainer
@@ -297,7 +358,7 @@ private fun eqButtonBorder(selected: Boolean) = BorderStroke(
 )
 
 @Composable
-private fun eqSelectedButtonColors() = ButtonDefaults.outlinedButtonColors(
+internal fun eqSelectedButtonColors() = ButtonDefaults.outlinedButtonColors(
     containerColor = MaterialTheme.colorScheme.secondaryContainer,
     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
 )
@@ -315,7 +376,7 @@ private fun eqResetButtonColors() = ButtonDefaults.outlinedButtonColors(
 )
 
 @Composable
-private fun eqOutlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
+internal fun eqOutlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
     containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
 )
@@ -328,22 +389,22 @@ private fun SavePresetDialog(
     var name by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("프리셋 저장") },
+        title = { Text(stringResource(R.string.graphic_eq_save_dialog_title)) },
         text = {
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
                 singleLine = true,
-                label = { Text("이름") },
+                label = { Text(stringResource(R.string.graphic_eq_preset_name)) },
             )
         },
         confirmButton = {
             Button(
                 onClick = { onConfirm(name) },
                 enabled = name.isNotBlank(),
-            ) { Text("저장") }
+            ) { Text(stringResource(R.string.graphic_eq_save)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
     )
 }
 
@@ -359,7 +420,7 @@ private fun VerticalEqBand(
         modifier = Modifier.width(34.dp),
     ) {
         Text(
-            String.format("%+.0f", gainDb),
+            String.format(java.util.Locale.US, "%+.0f", gainDb),
             style = MaterialTheme.typography.labelSmall,
         )
         Box(

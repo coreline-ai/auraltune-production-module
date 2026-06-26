@@ -28,6 +28,7 @@ import java.nio.ByteOrder
 class AuralTuneAudioProcessor(
     private val engine: AudioEngine,
     private val analyzer: SpectrumAnalyzer? = null,
+    private val onFormatChanged: ((sampleRateHz: Int, bitDepth: Int) -> Unit)? = null,
 ) : BaseAudioProcessor() {
 
     /** True only for stereo input — the engine's interleaved-stereo contract. */
@@ -61,6 +62,7 @@ class AuralTuneAudioProcessor(
             engine.updateSampleRate(inputAudioFormat.sampleRate)
         }
         analyzer?.setSampleRate(inputAudioFormat.sampleRate) // 스펙트럼 주파수 매핑용
+        onFormatChanged?.invoke(inputAudioFormat.sampleRate, bitDepthOf(inputAudioFormat.encoding))
 
         // ALWAYS output 16-bit PCM regardless of input encoding. DefaultAudioSink's
         // downstream processors (SilenceSkipping/Sonic) reject PCM_FLOAT, so emitting
@@ -120,5 +122,11 @@ class AuralTuneAudioProcessor(
 
     override fun onReset() {
         floatScratch = null
+    }
+
+    private fun bitDepthOf(encoding: Int): Int = when (encoding) {
+        C.ENCODING_PCM_16BIT -> 16
+        C.ENCODING_PCM_FLOAT -> 32
+        else -> 0
     }
 }

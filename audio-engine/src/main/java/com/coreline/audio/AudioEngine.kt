@@ -78,7 +78,8 @@ class AudioEngine(sampleRate: Int) : Closeable {
      * @param preampDB AutoEQ chain preamp in dB. Range [-30, +30].
      * @param enableLimiter Whether the post-cascade soft limiter is active.
      * @param profileOptimizedRate Sample rate the profile was optimized for (Hz). Default 48000.
-     * @param filterTypes 0=PEAKING, 1=LOW_SHELF, 2=HIGH_SHELF (one per filter).
+     * @param filterTypes 0=PEAKING, 1=LOW_SHELF, 2=HIGH_SHELF, 3=HIGH_PASS
+     * (one per filter).
      * @param frequencies Center/cutoff frequencies in Hz.
      * @param gainsDB Per-filter gains in dB.
      * @param qFactors Per-filter Q factors.
@@ -118,17 +119,23 @@ class AudioEngine(sampleRate: Int) : Closeable {
     /**
      * Update the Manual EQ chain (≤20 biquad sections).
      * Phase 2: Manual preamp is forced to 0 dB; user gain is managed by limiter.
+     *
+     * [filterTypes] holds [EqFilterType.nativeId] per band (Peaking/LowShelf/HighShelf/HighPass).
+     * The graphic EQ passes all-Peaking; the parametric editor passes per-band types.
+     * HighPass ignores its gain entry (RBJ cookbook), but a finite value must still be supplied.
      */
     fun updateManualEq(
         frequencies: FloatArray,
         gainsDB: FloatArray,
         qFactors: FloatArray,
+        filterTypes: IntArray,
     ): Int {
         require(handle != 0L) { "AudioEngine is closed" }
         require(frequencies.size == gainsDB.size) { "size mismatch" }
         require(frequencies.size == qFactors.size) { "size mismatch" }
+        require(frequencies.size == filterTypes.size) { "size mismatch" }
         require(frequencies.size <= MAX_MANUAL_FILTERS) { "Manual EQ supports max $MAX_MANUAL_FILTERS filters" }
-        return nativeUpdateManualEq(handle, frequencies, gainsDB, qFactors)
+        return nativeUpdateManualEq(handle, frequencies, gainsDB, qFactors, filterTypes)
     }
 
     /**
@@ -563,6 +570,7 @@ class AudioEngine(sampleRate: Int) : Closeable {
         frequencies: FloatArray,
         gainsDB: FloatArray,
         qFactors: FloatArray,
+        filterTypes: IntArray,
     ): Int
     private external fun nativeSetAutoEqEnabled(handle: Long, enabled: Boolean, immediate: Boolean)
     private external fun nativeSetManualEqEnabled(handle: Long, enabled: Boolean)

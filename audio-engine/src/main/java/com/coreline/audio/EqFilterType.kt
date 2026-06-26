@@ -3,7 +3,7 @@ package com.coreline.audio
 /**
  * Mirror of the native EqFilterType enum.
  *
- * `nativeId` is the wire value passed to AudioEngine.updateAutoEq(filterTypes=...).
+ * `nativeId` is the wire value passed to AudioEngine update calls.
  * Keep these ordinals in sync with auraltune::audio::EqFilterType in C++.
  */
 enum class EqFilterType(val nativeId: Int) {

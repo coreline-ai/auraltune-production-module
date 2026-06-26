@@ -24,6 +24,18 @@ object GraphicEqBands {
     /** User-selectable gain limits (segmented chips). [MAX_GAIN_DB] is the default. */
     val GAIN_LIMIT_OPTIONS = floatArrayOf(6.0f, 12.0f, 15.0f, 20.0f)
 
+    /**
+     * Global Q multiplier options for the graphic EQ ("넓게 / 보통 / 좁게").
+     * 1.0 = the default ~−3dB crossover [q]; <1 widens each bell (gentler, more overlap),
+     * >1 narrows it (more surgical). Applied uniformly to every band.
+     */
+    val Q_SCALE_OPTIONS = floatArrayOf(0.5f, 1.0f, 2.0f)
+    const val DEFAULT_Q_SCALE = 1.0f
+
+    /** Clamp for the effective per-band Q after scaling, so an extreme scale stays stable. */
+    private const val MIN_EFFECTIVE_Q = 0.2
+    private const val MAX_EFFECTIVE_Q = 12.0
+
     /** Log-spaced center frequencies: f_i = 20 * 1000^(i/(N-1)). */
     val frequencies: DoubleArray = DoubleArray(COUNT) { i ->
         MIN_HZ * (MAX_HZ / MIN_HZ).pow(i.toDouble() / (COUNT - 1))
@@ -43,18 +55,27 @@ object GraphicEqBands {
     fun label(freqHz: Double): String = when {
         freqHz >= 1000.0 -> {
             val k = freqHz / 1000.0
-            if (k >= 10.0) "${k.toInt()}k" else String.format("%.1fk", k)
+            if (k >= 10.0) "${k.toInt()}k" else String.format(java.util.Locale.US, "%.1fk", k)
         }
         else -> freqHz.toInt().toString()
     }
 
-    /** Build BiquadSpec list from current band gains (skip ~0dB bands). */
-    fun toSpecs(bandGainsDb: FloatArray): List<BiquadSpec> {
+    /** Snap an arbitrary scale to the nearest [Q_SCALE_OPTIONS] value. */
+    fun snapQScale(scale: Float): Float =
+        Q_SCALE_OPTIONS.minByOrNull { kotlin.math.abs(it - scale) } ?: DEFAULT_Q_SCALE
+
+    /**
+     * Build BiquadSpec list from current band gains (skip ~0dB bands).
+     * [qScale] multiplies the default crossover [q] uniformly (see [Q_SCALE_OPTIONS]);
+     * the result is clamped to a stable range. Default 1.0 keeps legacy behavior.
+     */
+    fun toSpecs(bandGainsDb: FloatArray, qScale: Float = DEFAULT_Q_SCALE): List<BiquadSpec> {
+        val effQ = (q * qScale).coerceIn(MIN_EFFECTIVE_Q, MAX_EFFECTIVE_Q)
         val out = ArrayList<BiquadSpec>(COUNT)
         for (i in 0 until COUNT) {
             val g = bandGainsDb.getOrElse(i) { 0f }.toDouble()
             if (kotlin.math.abs(g) < 0.05) continue // near-flat → skip
-            out.add(BiquadSpec(BiquadType.PEAKING, frequencies[i], g, q))
+            out.add(BiquadSpec(BiquadType.PEAKING, frequencies[i], g, effQ))
         }
         return out
     }

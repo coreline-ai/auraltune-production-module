@@ -49,7 +49,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 ### 1.1 TopAppBar 사양
 
 - Material3 `TopAppBar`, **제목 Text 1개만** — 내비게이션 아이콘 ❌, 액션 ❌, **검색창 ❌**(검색은 본문에 있음, §4.2/4.3).
-- 제목은 `selectedTab`로 결정. `·`(가운뎃점) 구분자와 "AutoEQ"/"OPRA" 접미사는 **하드코딩 문자열**.
+- 제목은 `selectedTab`로 결정. `AuralTune · AutoEQ`, `AuralTune · OPRA` 형식은 `app_title_with_source` 리소스로 관리한다.
 
 | 탭 | 제목 |
 |----|------|
@@ -64,8 +64,8 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 | 순서 | 탭 | 아이콘 | 라벨 | 비고 |
 |------|----|--------|------|------|
 | 1 | PLAYER | `Icons.Default.LibraryMusic` | `플레이어` (`tab_player`) | 홈/기본 |
-| 2 | AUTOEQ | `Icons.Default.GraphicEq` | `AutoEQ` (**하드코딩**) | |
-| 3 | OPRA | `Icons.Default.Tune` | `OPRA` (**하드코딩**) | |
+| 2 | AUTOEQ | `Icons.Default.GraphicEq` | `AutoEQ` (`tab_autoeq`) | |
+| 3 | OPRA | `Icons.Default.Tune` | `OPRA` (`tab_opra`) | |
 
 > ⚠️ 3개 아이콘 모두 `contentDescription=null` (접근성 갭).
 > ✅ **활성 소스 배지** — 현재 적용 중인 보정 소스 탭(AutoEQ/OPRA) 아이콘에 점 배지(`BadgedBox`+`Badge`). 어느 소스가 실제로 도는지 탭에서 바로 보임(§9.1).
@@ -74,7 +74,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 
 1. **미니 플레이어 영속 (중요)** — 재생 세션은 앱 전역 **하나**(`MusicPlayerController`, ViewModel 보유, 회전에도 유지). 플레이어 탭에서 재생 시작 후 다른 탭으로 가면 하단에 MiniPlayer로 계속. **표시 조건 = `selectedTab != PLAYER` AND `playback.hasMedia`**. MiniPlayer 아무 곳이나 탭 → PLAYER 탭으로 펼침.
 2. **탭 상태 보존** — 탭별 `LazyListState` 3개(player/autoEq/opra)를 상위에서 호이스팅 → 스크롤 위치 유지. `selectedTab`은 `rememberSaveable`(프로세스 사망/회전에도 유지). 검색어·선택 프로파일은 ViewModel에 있어 탭 전환에도 유지.
-3. **보정 슬롯 1개** — AutoEQ·OPRA는 같은 단일 슬롯을 공유, 마지막 선택이 이김(§9.1).
+3. **탭별 선택 + 활성 provider 1개** — AutoEQ·OPRA 선택값은 각각 보존하고, 실제 엔진에는 `activeCorrectionProvider`의 선택만 적용한다. 비활성 탭의 카드 전체를 누르면 해당 provider가 “현재 사용중”으로 전환된다(§9.1).
 4. **Edge-to-edge** — 상태바·내비바 투명. 콘텐츠가 시스템 바 아래까지 그려지며 `Scaffold`가 inset 패딩 공급. 상태바 아이콘 극성은 테마에 따라 반전(라이트=어두운 아이콘, 다크=밝은 아이콘).
 
 ---
@@ -170,13 +170,13 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 
 | 위치 | 아이콘 | cd |
 |------|--------|-----|
-| 내비 1/2/3 | `LibraryMusic` / `GraphicEq` / `Tune` | null ⚠️ |
+| 내비 1/2/3 | `LibraryMusic` / `GraphicEq` / `Tune` | tab label |
 | 트랜스포트 | `SkipPrevious` / `PlayArrow` / `Pause` / `SkipNext` | 있음(player_*) |
-| QueueRow 선두 | `MusicNote`(비현재) / `PlayArrow`(현재·정지) / `Pause`(현재·재생) | null ⚠️ |
+| QueueRow 선두 | `MusicNote`(비현재) / `PlayArrow`(현재·정지) / `Pause`(현재·재생) | player_queue_item_* |
 | QueueRow 말미 / StatusCard | `Close` | player_remove / clear_selection |
 | CatalogEntryRow 즐겨찾기 | `Filled.Star`(on) / `Outlined.Star`(off) | favorite_toggle |
-| 접이식 카드 헤더 | `ExpandLess`(펼침) / `ExpandMore`(접힘) | null ⚠️ |
-| 파일 추가 버튼 | `Add` | — |
+| 접이식 카드 헤더 | `ExpandLess`(펼침) / `ExpandMore`(접힘) | diagnostics_* / about_* |
+| 파일 추가 버튼 | `Add` | player_add_files |
 
 ### 2.5 카드 컨테이너 (실측 — `AuralTunePanel` 공통 래퍼)
 
@@ -211,7 +211,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 
 | 탭 | 본문(LazyColumn) 위→아래 순서 |
 |----|------|
-| **PLAYER** | ① 지금재생 카드 → ② 파일액션 Row → ③ 큐(빈상태 or 헤더+행들) |
+| **PLAYER** | ① 지금재생 카드(스펙트럼 + 비트뎁스/샘플레이트) → ② Android 12+ 블루투스 권한 안내(필요 시) → ③ 원음/EQ 적용/커스텀 + 프리앰프 컨트롤 → ④ 재생목록 헤더(+ 파일 추가 버튼) → ⑤ 큐(빈상태 or 행들) |
 | **AUTOEQ** | 〔소스블록 A〕검색 → (최근 빠른선택 드롭다운) → Import EQ·Clear cache → 프로파일 업데이트 확인 → 카탈로그 상태/목록 〔공유 보정영역〕StatusCard → ListenModeBar → GraphicEqCard → AutoEqPreampCard → DiagnosticsCard → (DEBUG)AudioFxProbe → AboutCard |
 | **OPRA** | 〔소스블록 B〕검색 → 데이터 갱신 → 결과/빈상태 → **CC footer** 〔공유 보정영역〕(AUTOEQ와 동일 순서) |
 

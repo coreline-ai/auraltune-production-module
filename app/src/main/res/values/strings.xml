@@ -9,6 +9,9 @@
 
     <!-- Bottom navigation -->
     <string name="tab_player">플레이어</string>
+    <string name="tab_autoeq">AutoEQ</string>
+    <string name="tab_opra">OPRA</string>
+    <string name="app_title_with_source">%1$s · %2$s</string>
 
     <!-- Player tab + mini player -->
     <string name="player_no_media">재생할 파일이 없습니다</string>
@@ -22,12 +25,40 @@
     <string name="player_queue_empty">‘파일 추가’로 음악을 담아보세요</string>
     <string name="player_queue_title">재생목록 (%1$d)</string>
     <string name="saf_unavailable">이 기기에서 파일 선택기를 열 수 없습니다 (SAF 미지원)</string>
+    <string name="player_mode_original">원음</string>
+    <string name="player_mode_eq_applied">EQ 적용</string>
+    <string name="player_mode_custom">커스텀</string>
+    <string name="player_preamp">프리앰프</string>
+    <string name="player_queue_item_idle">재생목록 항목</string>
+    <string name="player_queue_item_selected">현재 선택된 곡</string>
+    <string name="player_queue_item_playing">현재 재생 중</string>
+    <string name="imported_profile_fallback">Imported profile</string>
+    <string name="imported_source_label">Imported</string>
+    <string name="import_success_format">Imported "%1$s"</string>
+    <string name="import_failure_format">Import failed: %1$s</string>
+    <string name="parse_error_label">ParseError</string>
+    <string name="cache_cleared">Cache cleared</string>
+
+    <!-- Bluetooth permission notice -->
+    <string name="bt_permission_title">블루투스 기기 식별 권한</string>
+    <string name="bt_permission_body">Android 12 이상에서는 블루투스 기기를 정확히 구분하려면 권한이 필요합니다. 허용하지 않아도 제품명 기반으로 계속 동작하지만, 같은 이름의 기기는 같은 프로필로 보일 수 있습니다.</string>
+    <string name="bt_permission_allow">권한 허용</string>
+    <string name="bt_permission_later">나중에</string>
 
     <!-- Search -->
     <string name="search_placeholder">Search headphones…</string>
     <string name="no_results">No headphones found</string>
     <string name="search_prompt">Type a model name to search, or pick from the quick-select above</string>
     <string name="clear_search">Clear search</string>
+    <string name="profile_picker_expand">프로파일 목록 열기</string>
+    <string name="profile_picker_title">프로파일 선택</string>
+    <string name="profile_picker_placeholder">최근 프로파일에서 선택</string>
+    <string name="profile_update_check">프로파일 업데이트 확인</string>
+    <string name="profile_update_skip_original">원음 모드 — 업데이트를 건너뜁니다</string>
+    <string name="profile_update_checking">프로파일 업데이트 확인 중…</string>
+    <string name="profile_update_no_change">프로파일이 최신 상태입니다</string>
+    <string name="profile_update_updated_format">프로파일 업데이트됨 (변경 %1$d, 제거 %2$d)</string>
+    <string name="profile_update_failed_format">업데이트 확인 실패: %1$s</string>
 
     <!-- Status card -->
     <string name="no_correction_active">No correction active</string>
@@ -36,6 +67,8 @@
     <string name="preamp_toggle">AutoEQ preamp</string>
     <string name="clear_selection">Clear selection</string>
     <string name="favorite_toggle">Favorite</string>
+    <string name="in_use_badge">현재 사용중</string>
+    <string name="status_profile_icon">선택된 보정 프로파일</string>
 
     <!-- Diagnostics card -->
     <string name="diagnostics_title">Diagnostics</string>
@@ -53,6 +86,10 @@
     <string name="diagnostics_sample_rate_now">current sample rate</string>
     <string name="diagnostics_total_frames">total processed frames</string>
     <string name="diagnostics_no_device">— no eligible device —</string>
+    <string name="diagnostics_autoeq_active_filters">AutoEQ active filters</string>
+    <string name="diagnostics_applied_generation">Applied generation</string>
+    <string name="diagnostics_expand">진단 정보 펼치기</string>
+    <string name="diagnostics_collapse">진단 정보 접기</string>
 
     <!-- Kill switch (P2-E) — folded into the listen-mode bar (원음); kept for reference -->
     <string name="kill_switch_label">Kill switch</string>
@@ -61,12 +98,55 @@
     <!-- Listen-mode A/B/C compare bar -->
     <string name="listen_mode_title">비교 모드</string>
     <string name="listen_mode_original">원음</string>
-    <string name="listen_mode_autoeq">AutoEQ</string>
+    <string name="listen_mode_autoeq">EQ 적용</string>
     <string name="listen_mode_user">내 설정</string>
     <string name="listen_mode_hint_original">EQ 미적용 — 순수 원음</string>
     <string name="listen_mode_hint_autoeq">AutoEQ/OPRA 프로파일만 적용</string>
-    <string name="listen_mode_hint_user">프로파일 + 내 그래픽 EQ 보정</string>
-    <string name="listen_mode_hint_user_flat">프로파일 + 내 그래픽 EQ (현재 평탄 = AutoEQ와 동일)</string>
+    <string name="listen_mode_hint_user">프로파일 + 내 EQ 보정</string>
+    <string name="listen_mode_hint_user_flat">프로파일 + 내 EQ (현재 평탄 = AutoEQ와 동일)</string>
+
+    <!-- Graphic EQ -->
+    <string name="graphic_eq_title">그래픽 EQ (20밴드)</string>
+    <string name="graphic_eq_save">저장</string>
+    <string name="graphic_eq_load_count">불러오기 (%1$d)</string>
+    <string name="graphic_eq_empty">저장된 프리셋 없음</string>
+    <string name="graphic_eq_delete">삭제</string>
+    <string name="graphic_eq_preamp_format">프리앰프 표시 (%1$s dB)</string>
+    <string name="graphic_eq_preamp_none">프리앰프 표시 (프로파일 없음)</string>
+    <string name="graphic_eq_reset">리셋</string>
+    <string name="graphic_eq_limit">EQ 한계</string>
+    <string name="graphic_eq_save_dialog_title">프리셋 저장</string>
+    <string name="graphic_eq_preset_name">이름</string>
+    <string name="graphic_eq_load_menu">프리셋 불러오기</string>
+    <string name="common_cancel">취소</string>
+
+    <!-- Graphic EQ: 전역 Q 배율 (넓게/보통/좁게) -->
+    <string name="graphic_eq_q_scale">종 폭 (Q)</string>
+    <string name="graphic_eq_q_wide">넓게</string>
+    <string name="graphic_eq_q_normal">보통</string>
+    <string name="graphic_eq_q_narrow">좁게</string>
+
+    <!-- EQ 편집 모드 토글 + 파라메트릭 EQ -->
+    <string name="eq_mode_graphic">그래픽</string>
+    <string name="eq_mode_parametric">파라메트릭</string>
+    <string name="eq_mode_label">EQ 편집 방식</string>
+    <string name="eq_mode_global_caption">내 EQ 설정은 모든 소스(AutoEQ·OPRA)에 공통 적용됩니다.</string>
+    <string name="parametric_eq_title">파라메트릭 EQ</string>
+    <string name="parametric_eq_add">밴드 추가</string>
+    <string name="parametric_eq_empty">아래 \'밴드 추가\'로 시작하세요. 그래프의 점을 드래그해 주파수·게인을 조절합니다.</string>
+    <string name="parametric_eq_count">%1$d / %2$d 밴드</string>
+    <string name="parametric_eq_type">유형</string>
+    <string name="parametric_eq_delete">밴드 삭제</string>
+    <string name="parametric_eq_select_hint">그래프의 점을 탭해 선택하고, 위아래로 드래그해 게인·주파수를 조절합니다.</string>
+    <string name="parametric_eq_max_reached">최대 %1$d개까지 추가할 수 있습니다.</string>
+    <!-- 응답 그래프 범례 -->
+    <string name="legend_my_eq">내 EQ</string>
+    <string name="legend_profile">프로파일</string>
+    <string name="legend_band">밴드</string>
+    <string name="filter_type_peaking">피킹</string>
+    <string name="filter_type_low_shelf">로우 셸프</string>
+    <string name="filter_type_high_shelf">하이 셸프</string>
+    <string name="filter_type_high_pass">하이패스</string>
 
     <!-- Attribution (Phase 7 release task) -->
     <string name="autoeq_attribution">Headphone correction profiles courtesy of Jaakko Pasanen\'s AutoEq project (MIT License)</string>
@@ -74,6 +154,8 @@
     <!-- About / 정보 (Phase 5: license & attribution) -->
     <string name="about_title">About &amp; licenses</string>
     <string name="about_app_version">AuralTune %1$s</string>
+    <string name="about_expand">정보와 라이선스 펼치기</string>
+    <string name="about_collapse">정보와 라이선스 접기</string>
 
     <!-- OPRA attribution & license (CC BY-SA 4.0) -->
     <string name="opra_attribution">Headphone &amp; EQ data from OPRA (Open Profiles for Revealing Audio), a community database started by Roon Labs.</string>
@@ -90,6 +172,19 @@
 
     <!-- OPRA tab footer -->
     <string name="opra_tab_footer">OPRA data · CC BY-SA 4.0 · not affiliated with Roon Labs / OPRA</string>
+    <string name="opra_search_placeholder">OPRA 헤드폰 검색…</string>
+    <string name="opra_refresh">OPRA 데이터 갱신</string>
+    <string name="opra_refreshing">OPRA 갱신 중…</string>
+    <string name="opra_sync_no_change">OPRA: 최신 상태</string>
+    <string name="opra_sync_updated_format">OPRA 갱신됨 (제품 %1$d, 프로파일 %2$d)</string>
+    <string name="opra_sync_failed_format">OPRA 갱신 실패: %1$s</string>
+    <string name="opra_profile_not_found">OPRA 프로파일을 찾을 수 없습니다</string>
+    <string name="opra_profile_unsupported">이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)</string>
+    <string name="opra_profile_picker_title">OPRA 프로파일 선택</string>
+    <string name="opra_profile_picker_placeholder">최근 OPRA 프로파일에서 선택</string>
+    <string name="opra_empty_loading">OPRA 데이터를 불러오는 중…</string>
+    <string name="opra_empty_prompt">OPRA 헤드폰을 검색하거나 ‘OPRA 데이터 갱신’을 누르세요</string>
+    <string name="opra_unsupported_suffix"> · 적용 불가</string>
 
     <!-- OPRA profile detail sheet -->
     <string name="opra_detail_author_format">Measured by %1$s</string>

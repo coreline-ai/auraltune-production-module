@@ -232,6 +232,36 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ----------------- EQ mode (GRAPHIC vs PARAMETRIC) -----------------
+    /** Which Manual-chain editor the user is in. Persisted as the EqMode enum name. */
+    val eqMode: Flow<String> = store.data.map { it[KEY_EQ_MODE] ?: DEFAULT_EQ_MODE }
+    suspend fun setEqMode(mode: String) {
+        store.edit { it[KEY_EQ_MODE] = mode }
+    }
+
+    // ----------------- Graphic EQ: global Q scale (넓게/보통/좁게) -----------------
+    /** Uniform Q multiplier for all graphic bands. Snapped to [GraphicEqBands.Q_SCALE_OPTIONS]. */
+    val graphicQScale: Flow<Float> =
+        store.data.map { prefs ->
+            GraphicEqBands.snapQScale(prefs[KEY_GEQ_Q_SCALE] ?: GraphicEqBands.DEFAULT_Q_SCALE)
+        }
+
+    suspend fun setGraphicQScale(scale: Float) {
+        store.edit { it[KEY_GEQ_Q_SCALE] = scale }
+    }
+
+    // ----------------- Parametric EQ: free-form band list -----------------
+    /** Persisted parametric bands (each normalized on read). Empty when unset. */
+    val parametricBands: Flow<List<ParametricBand>> =
+        store.data.map { prefs -> prefs[KEY_PARAMETRIC_BANDS]?.let { decodeParametric(it) } ?: emptyList() }
+
+    suspend fun setParametricBands(bands: List<ParametricBand>) {
+        store.edit { prefs ->
+            if (bands.isEmpty()) prefs.remove(KEY_PARAMETRIC_BANDS)
+            else prefs[KEY_PARAMETRIC_BANDS] = encodeParametric(bands)
+        }
+    }
+
     // ----------------- Recent / quick-pick profiles (spinner) -----------------
     /** Most-recently-selected catalog entries (most recent first), capped at [MAX_RECENT]. */
     val recentProfiles: Flow<List<AutoEqCatalogEntry>> =
@@ -295,6 +325,14 @@ class SettingsStore(context: Context) {
 
     private fun decodeRecentOpra(raw: String): List<RecentOpraProfile> =
         runCatching { json.decodeFromString(recentOpraSerializer, raw) }.getOrElse { emptyList() }
+
+    private fun encodeParametric(list: List<ParametricBand>): String =
+        json.encodeToString(parametricSerializer, list.map { it.normalized() }.take(ParametricBand.MAX_BANDS))
+
+    private fun decodeParametric(raw: String): List<ParametricBand> =
+        runCatching {
+            json.decodeFromString(parametricSerializer, raw).map { it.normalized() }.take(ParametricBand.MAX_BANDS)
+        }.getOrElse { emptyList() }
 
     private fun encodePlayback(s: PlaybackSnapshot): String =
         json.encodeToString(PlaybackSnapshot.serializer(), s)
@@ -367,6 +405,12 @@ class SettingsStore(context: Context) {
         private val KEY_RECENT_OPRA = stringPreferencesKey("recent_opra_profiles_json")
         private val KEY_OPRA_PARSER_VERSION = intPreferencesKey("opra_parser_version")
         private val KEY_PLAYBACK_SNAPSHOT = stringPreferencesKey("playback_snapshot_json")
+        private val KEY_EQ_MODE = stringPreferencesKey("eq_mode")
+        private val KEY_GEQ_Q_SCALE = floatPreferencesKey("graphic_eq_q_scale")
+        private val KEY_PARAMETRIC_BANDS = stringPreferencesKey("parametric_bands_json")
+
+        /** Default EQ editing mode — must match EqMode.GRAPHIC.name. */
+        const val DEFAULT_EQ_MODE = "GRAPHIC"
 
         /** Spinner / quick-pick capacity. */
         const val MAX_RECENT = 10
@@ -382,6 +426,7 @@ class SettingsStore(context: Context) {
         private val presetsSerializer = ListSerializer(GraphicEqPreset.serializer())
         private val recentsSerializer = ListSerializer(AutoEqCatalogEntry.serializer())
         private val recentOpraSerializer = ListSerializer(RecentOpraProfile.serializer())
+        private val parametricSerializer = ListSerializer(ParametricBand.serializer())
     }
 }
 

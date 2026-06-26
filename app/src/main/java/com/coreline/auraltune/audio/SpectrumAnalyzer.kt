@@ -77,14 +77,15 @@ class SpectrumAnalyzer(
                     if (w >= FFT_SIZE && w != lastWrite) {
                         lastWrite = w
                         if (sampleRate != edgesForSr) {
-                            computeBandEdges(loBin, hiBin, sampleRate); edgesForSr = sampleRate
+                            SpectrumAnalyzerMath.computeBandEdges(loBin, hiBin, sampleRate)
+                            edgesForSr = sampleRate
                         }
                         val startIdx = w - FFT_SIZE
                         for (i in 0 until FFT_SIZE) {
                             re[i] = ring[((startIdx + i) and RING_MASK).toInt()] * window[i]
                             im[i] = 0f
                         }
-                        fft(re, im)
+                        SpectrumAnalyzerMath.fft(re, im)
                         for (b in 0 until bandCount) {
                             var k = loBin[b]
                             val hi = hiBin[b]
@@ -114,26 +115,53 @@ class SpectrumAnalyzer(
         }
     }
 
+    override fun close() {
+        scope.coroutineContext[Job]?.cancel()
+    }
+
+    companion object {
+        private const val FFT_SIZE = 2048
+        private const val RING_SIZE = 8192 // 2^n, 약 170ms@48k
+        private const val RING_MASK = (RING_SIZE - 1).toLong()
+        private const val DEFAULT_BANDS = 48
+        private const val FRAME_MS = 22L // ~45fps
+        private const val ATTACK = 0.5f
+        private const val DECAY = 0.12f
+        // dB 매핑 범위(디바이스 튜닝 가능): FLOOR=바닥, CEIL=꼭대기.
+        private const val DB_FLOOR = -66f
+        private const val DB_CEIL = -12f
+    }
+}
+
+internal object SpectrumAnalyzerMath {
+    const val FFT_SIZE = 2048
+
     /** 밴드 b의 FFT 빈 범위(lo..hi)를 로그 간격(40Hz~min(Nyquist,18k))으로 계산. */
-    private fun computeBandEdges(lo: IntArray, hi: IntArray, sr: Int) {
+    fun computeBandEdges(lo: IntArray, hi: IntArray, sampleRate: Int, fftSize: Int = FFT_SIZE) {
+        require(lo.size == hi.size) { "lo/hi size mismatch" }
+        require(sampleRate > 0) { "sampleRate must be positive" }
+        require(fftSize > 0 && (fftSize and (fftSize - 1)) == 0) { "fftSize must be a power of two" }
         val n = lo.size
-        val maxBin = FFT_SIZE / 2 - 1
-        val binHz = sr.toDouble() / FFT_SIZE
+        val maxBin = fftSize / 2 - 1
+        val binHz = sampleRate.toDouble() / fftSize
         val fMin = 40.0
-        val fMax = minOf(sr / 2.0, 18_000.0)
+        val fMax = minOf(sampleRate / 2.0, 18_000.0)
         for (b in 0 until n) {
             val f0 = fMin * Math.pow(fMax / fMin, b.toDouble() / n)
             val f1 = fMin * Math.pow(fMax / fMin, (b + 1.0) / n)
             val b0 = (f0 / binHz).toInt().coerceIn(1, maxBin)
             var b1 = (f1 / binHz).toInt().coerceIn(1, maxBin)
             if (b1 < b0) b1 = b0
-            lo[b] = b0; hi[b] = b1
+            lo[b] = b0
+            hi[b] = b1
         }
     }
 
-    /** In-place iterative radix-2 Cooley-Tukey FFT(무할당). [re]/[im] 길이는 2의 거듭제곱(FFT_SIZE). */
-    private fun fft(re: FloatArray, im: FloatArray) {
+    /** In-place iterative radix-2 Cooley-Tukey FFT(무할당). [re]/[im] 길이는 2의 거듭제곱. */
+    fun fft(re: FloatArray, im: FloatArray) {
+        require(re.size == im.size) { "real/imag size mismatch" }
         val n = re.size
+        require(n > 0 && (n and (n - 1)) == 0) { "FFT length must be a power of two" }
         var j = 0
         for (i in 1 until n) {
             var bit = n shr 1
@@ -166,22 +194,5 @@ class SpectrumAnalyzer(
             }
             len = len shl 1
         }
-    }
-
-    override fun close() {
-        scope.coroutineContext[Job]?.cancel()
-    }
-
-    companion object {
-        private const val FFT_SIZE = 2048
-        private const val RING_SIZE = 8192 // 2^n, 약 170ms@48k
-        private const val RING_MASK = (RING_SIZE - 1).toLong()
-        private const val DEFAULT_BANDS = 48
-        private const val FRAME_MS = 22L // ~45fps
-        private const val ATTACK = 0.5f
-        private const val DECAY = 0.12f
-        // dB 매핑 범위(디바이스 튜닝 가능): FLOOR=바닥, CEIL=꼭대기.
-        private const val DB_FLOOR = -66f
-        private const val DB_CEIL = -12f
     }
 }

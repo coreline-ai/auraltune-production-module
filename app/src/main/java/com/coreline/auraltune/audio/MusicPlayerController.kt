@@ -55,6 +55,8 @@ data class PlaybackUiState(
     val durationMs: Long = 0L,
     val queue: List<TrackInfo> = emptyList(),
     val currentIndex: Int = -1,
+    val audioBitDepth: Int? = null,
+    val audioSampleRateHz: Int? = null,
 )
 
 @UnstableApi
@@ -66,8 +68,14 @@ class MusicPlayerController(
 
     private val appContext = context.applicationContext
     private val analyzer = SpectrumAnalyzer()
-    private val processor = AuralTuneAudioProcessor(engine, analyzer)
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
+    @Volatile private var currentAudioBitDepth: Int? = null
+    @Volatile private var currentAudioSampleRateHz: Int? = null
+    private val processor = AuralTuneAudioProcessor(engine, analyzer) { sampleRateHz, bitDepth ->
+        currentAudioSampleRateHz = sampleRateHz.takeIf { it > 0 }
+        currentAudioBitDepth = bitDepth.takeIf { it > 0 }
+        scope.launch { publish() }
+    }
 
     /** 재생 중 음원의 실시간 주파수 스펙트럼(밴드 레벨 0..1, post-EQ) — 플레이어 막대 시각화용. */
     val spectrum: StateFlow<FloatArray> get() = analyzer.spectrum
@@ -186,6 +194,8 @@ class MusicPlayerController(
         queue.forEach { releaseRead(it.uri) }
         player.clearMediaItems()
         queue = emptyList()
+        currentAudioBitDepth = null
+        currentAudioSampleRateHz = null
         publish()
         saveSnapshot()
     }
@@ -256,6 +266,8 @@ class MusicPlayerController(
             durationMs = player.duration.takeIf { it > 0L } ?: 0L,
             queue = queue,
             currentIndex = if (queue.isEmpty()) -1 else idx,
+            audioBitDepth = currentAudioBitDepth,
+            audioSampleRateHz = currentAudioSampleRateHz,
         )
     }
 

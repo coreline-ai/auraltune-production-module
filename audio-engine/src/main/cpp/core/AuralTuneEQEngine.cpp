@@ -439,6 +439,7 @@ int AuralTuneEQEngine::updateAutoEq(float preampDB,
 int AuralTuneEQEngine::updateManualEq(const float* frequencies,
                                      const float* gainsDB,
                                      const float* qs,
+                                     const int* types,
                                      int count) {
     if (count < 0 || count > kMaxManualFilters) return -1;
 
@@ -448,13 +449,20 @@ int AuralTuneEQEngine::updateManualEq(const float* frequencies,
         const float q    = qs          ? qs[i]          : NAN;
         if (!isFiniteFloat(freq) || freq <= 0.0f) return -1;
         if (!isFiniteFloat(q)    || q    <= 0.0f) return -1;
+        // gain is unused for HighPass but must still be finite/bounded if provided.
         if (!isFiniteFloat(gain) || std::fabs(gain) > kMaxAbsGainDB) return -1;
+        if (types) {
+            const int t = types[i];
+            if (t < 0 || t > static_cast<int>(EqFilterType::HighPass)) return -1;
+        }
     }
 
     std::lock_guard<std::mutex> lock(updateMutex_);
 
     manualActiveCount_ = count;
     for (int i = 0; i < count; ++i) {
+        manualParams_[i].type      = types ? static_cast<EqFilterType>(types[i])
+                                           : EqFilterType::Peaking;
         manualParams_[i].frequency = frequencies[i];
         manualParams_[i].gainDB    = gainsDB[i];
         manualParams_[i].q         = qs[i];
@@ -466,14 +474,28 @@ int AuralTuneEQEngine::updateManualEq(const float* frequencies,
 
     for (int i = 0; i < count; ++i) {
         const auto& p = manualParams_[i];
+        const double f = static_cast<double>(p.frequency);
+        const double q = static_cast<double>(p.q);
         if (p.frequency <= 0.0f ||
             p.frequency >= static_cast<float>(currentRate_ / 2.0)) {
+            // Manual filters are specified at the CURRENT device rate (no profile
+            // pre-warp). Dispatch by type; HighPass ignores gain (RBJ cookbook).
             slot->manualCoeffs[i] = BiquadCoeffs::unity();
         } else {
-            slot->manualCoeffs[i] = peakingCoeffs(static_cast<double>(p.frequency),
-                                                  p.gainDB,
-                                                  static_cast<double>(p.q),
-                                                  currentRate_);
+            switch (p.type) {
+                case EqFilterType::Peaking:
+                    slot->manualCoeffs[i] = peakingCoeffs(f, p.gainDB, q, currentRate_);
+                    break;
+                case EqFilterType::LowShelf:
+                    slot->manualCoeffs[i] = lowShelfCoeffs(f, p.gainDB, q, currentRate_);
+                    break;
+                case EqFilterType::HighShelf:
+                    slot->manualCoeffs[i] = highShelfCoeffs(f, p.gainDB, q, currentRate_);
+                    break;
+                case EqFilterType::HighPass:
+                    slot->manualCoeffs[i] = highPassCoeffs(f, q, currentRate_);
+                    break;
+            }
         }
     }
     for (int i = count; i < kMaxManualFilters; ++i) {

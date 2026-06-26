@@ -39,5 +39,19 @@ class SettingsStoreTest {
         store.setActiveOpraProfileId(null)
         assertEquals(SettingsStore.PROVIDER_AUTOEQ, store.activeCorrectionProvider.first())
         assertNull(store.activeOpraProfileId.first())
+
+        // Player queue snapshot: SAF URIs + current index/position survive a JSON round-trip.
+        val snapshot = PlaybackSnapshot(
+            tracks = listOf(
+                PlaybackTrack("content://media/external/audio/media/1", "Track One"),
+                PlaybackTrack("content://media/external/audio/media/2", "Track Two"),
+            ),
+            index = 1,
+            positionMs = 12_345L,
+        )
+        store.setPlaybackSnapshot(snapshot)
+        assertEquals(snapshot, store.playbackSnapshot.first())
+        store.setPlaybackSnapshot(null)
+        assertNull(store.playbackSnapshot.first())
     }
 }

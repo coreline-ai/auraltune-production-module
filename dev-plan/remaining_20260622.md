@@ -58,9 +58,9 @@
 
 ## 🟢 추가 완료 (2026-06-22 후속 세션 — 병렬 분석 + 전담 QA 적대적 검증)
 
-### Phase 7 — 통합 검증 + 문서 정합  ·  상태 `~` (대부분 완료)
-- **완료**: 적대적 릴리스 감사로 **미게이트 PII 로그 누수 발견·수정**(MusicPlayerController/DeviceAutoEqManager `Log` → `BuildConfig.DEBUG` gate), proguard `-assumenosideeffects Log{v,d,i}` 추가. QA 재감사: release dex PII 문자열 **0건**, probe TAG도 **0건**(proguard가 미게이트 probe까지 제거), 16KB 정렬 PASS, manifest 권한 정확히 5개. 테스트 **156개**(67/83/6) 확정. README/AGENTS/docs(autoeq·loudness)/AudioEngine KDoc 정합 완료.
-- **남은**: [ ] Android CI workflow(ci/android.yml) 갱신, [ ] release APK analyzer 정기 검사 자동화.
+### Phase 7 — 통합 검증 + 문서 정합  ·  상태 `~` (릴리스 게이트 보강)
+- **완료**: 적대적 릴리스 감사로 **미게이트 PII 로그 누수 발견·수정**(MusicPlayerController/DeviceAutoEqManager `Log` → `BuildConfig.DEBUG` gate), proguard `-assumenosideeffects Log{v,d,i}` 추가. QA 재감사: release dex PII 문자열 **0건**, probe TAG도 **0건**(proguard가 미게이트 probe까지 제거), 16KB 정렬 PASS, manifest 권한 정확히 5개. 이후 OPRA/플레이어/스펙트럼 workstream 반영 기준 테스트 목표는 **217개**(71/96/27/23). README/디자인핸드오프는 탭별 독립선택, OPRA parser-version force import, 큐 영속화, 실시간 스펙트럼, release marker gate 기준으로 갱신.
+- **남은**: [ ] GitHub 원격 배치 시 `ci/android.yml`을 실제 `.github/workflows/android.yml` 위치로 복사/동기화, [ ] 기기별 오디오 라우트 수동 spot check 기록.
 
 ### Phase 1 — Release DEBUG gate  ·  상태 `x` (완료 — facade 포함)
 - **완료**: 미디어 권한 `src/debug` manifest 분리 + 모든 debug 코드 `BuildConfig.DEBUG` gate + proguard Log strip.
@@ -96,11 +96,11 @@
   - [ ] 6-7 실기기 검증: 지원 앱 attach→apply→release, DynamicsProcessing/Equalizer 분기
   - 우선순위: **중** · 규모: 남은 부분 M · 사유: 코드 기반은 섰고, **가치는 coverage(외부앱 실측)에 좌우**. 기기·외부앱 확보 후 6-1부터.
 
-### Phase 7 — 통합 검증 및 문서 정합화  ·  상태 `[ ]`
-- [ ] 검증 명령 일괄: `compileDebugKotlin`+모든 모듈 `testDebugUnitTest`+`assembleRelease`
-- [ ] **16KB native alignment** 확인(`llvm-readelf -l libauraltune_audio.so`, Android 15+)
-- [ ] release APK analyzer로 debug class/string 노출 0 확인(apkanalyzer/dex dump)
-- [ ] `README.md` 갱신: DB-first catalog, retained VM lifecycle, release gate, 현재 아키텍처
+### Phase 7 — 통합 검증 및 문서 정합화  ·  상태 `[~]`
+- [x] 검증 명령 일괄 대상 갱신: `compileDebugKotlin`+모든 모듈 `testDebugUnitTest`+`assembleRelease`
+- [x] **16KB native alignment** 확인(`llvm-readelf -l libauraltune_audio.so`, Android 15+)
+- [x] release APK analyzer로 debug class/string 노출 0 확인(apkanalyzer/dex dump) + `ci/android.yml` 자동 gate 추가
+- [x] `README.md` 갱신: DB-first catalog, retained VM lifecycle, release gate, 현재 아키텍처
 - [ ] `docs/autoeq.md`: DB schema + fallback 흐름 / `docs/loudness-compensation.md` drift 재검토
 - [ ] dev-plan 문서들 상태 정합화
 - 우선순위: **높음(릴리스 직전)** · 규모: M · 사유: 릴리스 후보 고정.

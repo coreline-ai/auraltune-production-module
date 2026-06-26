@@ -158,7 +158,7 @@ fun StatusCard(
                     ) {
                         Icon(
                             imageVector = Icons.Default.GraphicEq,
-                            contentDescription = null,
+                            contentDescription = stringResource(R.string.status_profile_icon),
                             tint = MaterialTheme.colorScheme.secondaryContainer,
                         )
                     }
@@ -221,7 +221,7 @@ private fun InUseBadge() {
             )
             Spacer(Modifier.width(5.dp))
             Text(
-                text = "현재 사용중",
+                text = stringResource(R.string.in_use_badge),
                 style = MaterialTheme.typography.labelSmall,
             )
         }
@@ -317,7 +317,7 @@ fun AutoEqPreampCard(
     modifier: Modifier = Modifier,
 ) {
     AuralTunePanel(modifier = modifier) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             ToggleRow(
                 label = stringResource(R.string.preamp_toggle),
                 checked = preampEnabled,
@@ -415,7 +415,9 @@ fun DiagnosticsCard(
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
+                    contentDescription = stringResource(
+                        if (expanded) R.string.diagnostics_collapse else R.string.diagnostics_expand,
+                    ),
                 )
             }
             if (expanded) {
@@ -439,8 +441,14 @@ fun DiagnosticsCard(
                     DiagnosticsRow(stringResource(R.string.diagnostics_sample_rate), diagnostics.sampleRateChangeCount)
                     DiagnosticsRow(stringResource(R.string.diagnostics_total_frames), diagnostics.totalProcessedFrames)
                     // 보정이 실제 엔진에 걸렸는지 객관 확인용 — active filters > 0 이면 EQ 적용 중.
-                    DiagnosticsRow("AutoEQ active filters", diagnostics.autoEqActiveCount.toLong())
-                    DiagnosticsRow("Applied generation", diagnostics.appliedGeneration)
+                    DiagnosticsRow(
+                        stringResource(R.string.diagnostics_autoeq_active_filters),
+                        diagnostics.autoEqActiveCount.toLong(),
+                    )
+                    DiagnosticsRow(
+                        stringResource(R.string.diagnostics_applied_generation),
+                        diagnostics.appliedGeneration,
+                    )
                 }
             }
         }
@@ -561,7 +569,9 @@ fun AboutCard(
                 )
                 Icon(
                     imageVector = if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                    contentDescription = null,
+                    contentDescription = stringResource(
+                        if (expanded) R.string.about_collapse else R.string.about_expand,
+                    ),
                 )
             }
             if (expanded) {

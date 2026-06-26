@@ -75,6 +75,22 @@ class OpraRepositoryImplTest {
     }
 
     @Test
+    fun refresh_forceTrue_reimportsEvenWhenCommitIsUnchanged() = runBlocking {
+        val src = FakeSource(snapshot("c1", listOf(vendor, product, eq("pud:vogue::a", "pud::vogue"))))
+        val repo = OpraRepositoryImpl(store, src)
+        assertTrue(repo.refresh() is OpraSyncResult.Updated)
+        assertEquals(1, store.observeCatalog().first().size)
+
+        src.snapshot = snapshot(
+            "c1",
+            listOf(vendor, product, product2, eq("pud:vogue::a", "pud::vogue"), eq("pud:aria::b", "pud::aria")),
+        )
+        assertTrue(repo.refresh(force = true) is OpraSyncResult.Updated)
+        assertEquals(2, store.observeCatalog().first().size)
+        assertEquals("c1", store.syncState()!!.opraCommit)
+    }
+
+    @Test
     fun refresh_fetchFails_isFailed_andCacheRetained() = runBlocking {
         // Seed with a good snapshot first.
         OpraRepositoryImpl(store, FakeSource(snapshot("c1", listOf(vendor, product, eq("pud:vogue::a", "pud::vogue"))))).refresh()

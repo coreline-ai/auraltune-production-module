@@ -14,11 +14,17 @@ import com.coreline.autoeq.repository.DeltaResult
 import com.coreline.autoeq.search.AutoEqSearchEngine
 import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
+import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.MusicPlayerController
 import com.coreline.auraltune.data.GraphicEqPreset
+import com.coreline.auraltune.data.ParametricBand
 import com.coreline.auraltune.data.RecentOpraProfile
 import com.coreline.auraltune.data.SettingsStore
+import com.coreline.auraltune.audio.eq.BiquadSpec
+import com.coreline.auraltune.audio.eq.BiquadType
+import com.coreline.auraltune.audio.eq.EqMode
 import com.coreline.auraltune.audio.eq.GraphicEqBands
+import com.coreline.auraltune.audio.eq.toNativeId
 import com.coreline.auraltune.opra.OpraSyncResult
 import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.opra.model.OpraEqProfile
@@ -56,10 +62,13 @@ class AutoEqViewModel(
     // Created here (not in the host Composable) so it survives configuration changes
     // (rotation). Closed in onCleared(). The Composable only reads state / calls actions.
     // Application context is intentional — a retained ViewModel must not hold an Activity.
+    private val application = app
     private val locator = app.serviceLocator
     private val api: AutoEqApi = locator.autoEqApi
     private val settings: SettingsStore = locator.settingsStore
     private val engine: AudioEngine = locator.createAudioEngine()
+    private val importedProfileFallback = application.getString(R.string.imported_profile_fallback)
+    private val importedSourceLabel = application.getString(R.string.imported_source_label)
 
     /** Exposed so the screen can drive local music playback (T1). Owned/closed here. */
     val musicController: MusicPlayerController = MusicPlayerController(app, engine, settings)
@@ -214,6 +223,46 @@ class AutoEqViewModel(
     val selectedGraphicEqPresetId: StateFlow<String?> =
         settings.selectedGraphicEqPresetId.stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    // ── EQ 편집 모드(그래픽 / 파라메트릭) + 모드별 상태 ───────────────────────────
+    /** 현재 EQ 편집 모드. 그래픽=20밴드 고정, 파라메트릭=자유 밴드(그래프 드래그). */
+    val eqMode: StateFlow<EqMode> =
+        settings.eqMode.map { EqMode.fromKey(it) }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, EqMode.GRAPHIC)
+
+    /** 그래픽 EQ 전역 Q 배율(넓게/보통/좁게). 모든 밴드에 동일 적용. */
+    val graphicQScale: StateFlow<Float> =
+        settings.graphicQScale.stateIn(
+            viewModelScope, SharingStarted.Eagerly, GraphicEqBands.DEFAULT_Q_SCALE,
+        )
+
+    /** 파라메트릭 밴드 목록(타입/주파수/게인/Q). 그래프 드래그가 변경, debounce 후 적용·영속. */
+    private val _parametricBands = MutableStateFlow<List<ParametricBand>>(emptyList())
+    val parametricBands: StateFlow<List<ParametricBand>> = _parametricBands.asStateFlow()
+
+    /** 파라메트릭 편집기에서 현재 선택된 밴드 id(드래그/Q 슬라이더/타입 변경 대상). 비영속. */
+    private val _selectedParametricBandId = MutableStateFlow<String?>(null)
+    val selectedParametricBandId: StateFlow<String?> = _selectedParametricBandId.asStateFlow()
+
+    /**
+     * 현재 모드의 Manual chain 내용 = 응답 그래프 + 엔진 적용의 단일 소스.
+     * 그래픽: 20밴드 peaking(전역 Q 배율 반영). 파라메트릭: 타입드 밴드(무효 밴드 제거).
+     * combine이 모드·게인·Q배율·밴드 중 하나라도 바뀌면 재계산한다.
+     */
+    val manualResponseSpecs: StateFlow<List<BiquadSpec>> =
+        combine(eqMode, _bandGains, graphicQScale, _parametricBands) { mode, gains, qScale, bands ->
+            currentManualSpecs(mode, gains, qScale, bands)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * 현재 디코드 스트림(=엔진 Manual 계수가 계산되는) 샘플레이트(Hz). 응답 그래프를 48k 고정이 아니라
+     * 실제 적용 레이트로 그려 "그래프 = 소리"를 유지하기 위해 노출(고역 필터의 워핑이 레이트마다 다름).
+     * 재생 중이 아니면 엔진의 현재 레이트로 폴백.
+     */
+    val engineSampleRateHz: StateFlow<Int> =
+        musicController.state
+            .map { it.audioSampleRateHz ?: engine.sampleRate }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, engine.sampleRate)
+
     /** Polled native diagnostics. RT-safe: only [AudioEngine.readDiagnostics] is called. */
     val diagnostics: StateFlow<AudioEngine.Diagnostics> =
         flow {
@@ -307,16 +356,16 @@ class AutoEqViewModel(
 
         // 청취 모드(ORIGINAL/AUTOEQ/USER) + preamp 토글이 엔진 상태를 결정한다.
         // ORIGINAL = AutoEQ·매뉴얼·preamp 전부 off(순수 원음), AUTOEQ = 프로파일만,
-        // USER = 프로파일 + (비평탄) 그래픽 EQ. 매뉴얼 enable 규칙은 applyGraphicEq와 동일.
-        // _bandGains를 combine 소스로 포함 → 복원 전 빈 게인으로 manual을 잘못 끄는 init 경합 제거,
-        // 동시에 manual on/off의 단독 소유자가 되어 applyGraphicEq와의 이중 writer 경합도 없앤다.
-        // (engine.setAutoEqEnabled는 값 불변이면 early-return이라 밴드 틱마다 호출돼도 무해.)
+        // USER = 프로파일 + (비평탄) 사용자 EQ. manualResponseSpecs(그래픽/파라메트릭 통합 소스)를
+        // combine 소스로 포함 → 복원 전 빈 상태로 manual을 잘못 끄는 init 경합 제거, 동시에
+        // manual on/off의 단독 소유자가 되어 pushManualSpecs와의 이중 writer 경합도 없앤다.
+        // (engine.setAutoEqEnabled는 값 불변이면 early-return이라 틱마다 호출돼도 무해.)
         viewModelScope.launch {
-            combine(listenMode, preampEnabled, _bandGains) { mode, preamp, gains ->
-                Triple(mode, preamp, gains)
-            }.collect { (mode, preamp, gains) ->
+            combine(listenMode, preampEnabled, manualResponseSpecs) { mode, preamp, specs ->
+                Triple(mode, preamp, specs)
+            }.collect { (mode, preamp, specs) ->
                 val auto = mode != ListenMode.ORIGINAL
-                val manual = mode == ListenMode.USER && GraphicEqBands.toSpecs(gains).isNotEmpty()
+                val manual = mode == ListenMode.USER && specs.isNotEmpty()
                 // 비교용 전환이지만 클릭 방지를 위해 0.5s 크로스페이드 사용(immediate=false).
                 engine.setAutoEqEnabled(auto, immediate = false)
                 engine.setManualEqEnabled(manual)
@@ -343,19 +392,22 @@ class AutoEqViewModel(
             }
         }
 
-        // 그래픽 EQ: 저장된 현재 게인 1회 복원(앱 재시작 후에도 유지). 회전은 retained VM이 처리.
-        // 게인과 한계는 별도 키라 저장 시점이 다를 수 있으므로, 복원 시 한계로 clamp해 불변식 유지.
+        // 그래픽 게인 + 파라메트릭 밴드를 한 코루틴에서 복원한 "뒤에만" 영속화 collector를 시작한다.
+        // (복원이 끝나기 전 빈 초기값이 debounce(400) 저장 창에 걸려 저장된 EQ를 덮어쓰는 — 파라메트릭은
+        //  prefs.remove로 영구 삭제까지 가능한 — 콜드스타트 레이스를 제거.) 게인/한계는 별도 키라 복원 시
+        //  한계로 clamp해 불변식 유지. 복원 길이는 MAX_BANDS로 절단(손상/다운그레이드 데이터 방어).
         viewModelScope.launch {
             val limit = settings.graphicEqGainLimitDb.first()
             _bandGains.value = clampToLimit(settings.currentGraphicEqGains.first(), limit)
+            _parametricBands.value = settings.parametricBands.first()
+                .map { it.normalized() }.take(ParametricBand.MAX_BANDS)
+            // 복원 완료 후에만 영속화 시작 — debounce(400ms)로 DataStore 쓰기 빈도를 낮춘다.
+            launch { _bandGains.debounce(400L).collect { gains -> settings.setCurrentGraphicEqGains(gains) } }
+            launch { _parametricBands.debounce(400L).collect { bands -> settings.setParametricBands(bands) } }
         }
-        // 밴드 게인 변경 → debounce(40ms) → Manual chain 적용(과도한 publish 방지).
+        // 사용자 EQ 변경(그래픽/파라메트릭/Q배율/모드) → debounce(40ms) → Manual chain 적용.
         viewModelScope.launch {
-            _bandGains.debounce(40L).collect { gains -> applyGraphicEq(gains) }
-        }
-        // 변경 영속화는 더 긴 debounce(400ms)로 DataStore 쓰기 빈도를 낮춘다.
-        viewModelScope.launch {
-            _bandGains.debounce(400L).collect { gains -> settings.setCurrentGraphicEqGains(gains) }
+            manualResponseSpecs.debounce(40L).collect { specs -> pushManualSpecs(specs) }
         }
         // 앱 시작 시 백그라운드 delta 체크(쿨다운 DELTA_CHECK_INTERVAL_MS). 변경 있을 때만 알림.
         viewModelScope.launch {
@@ -473,15 +525,25 @@ class AutoEqViewModel(
         val arr = _bandGains.value
         val needsClamp = arr.any { it > snapped || it < -snapped }
         val clamped = if (needsClamp) clampToLimit(arr, snapped) else null
+        // 파라메트릭 밴드도 새 한계로 즉시 재클램프(그래픽과 동일 규칙). 안 하면 보이는 값(±한계로 표시)과
+        // 실제 적용 게인이 어긋난다. HP는 게인 개념이 없으므로 제외.
+        val hpId = com.coreline.audio.EqFilterType.HIGH_PASS.nativeId
+        val curBands = _parametricBands.value
+        val clampedBands = curBands.map { b ->
+            if (b.type == hpId) b else b.copy(gainDb = b.gainDb.coerceIn(-snapped, snapped))
+        }
+        val bandsChanged = clampedBands != curBands
         viewModelScope.launch {
-            // 한계와 (clamp된) 게인을 함께 즉시 기록 — 둘의 저장 지연 차이로 인한 불일치 제거.
+            // 한계와 (clamp된) 게인/밴드를 함께 즉시 기록 — 저장 지연 차이로 인한 불일치 제거.
             settings.setGraphicEqGainLimitDb(snapped)
             clamped?.let { settings.setCurrentGraphicEqGains(it) }
+            if (bandsChanged) settings.setParametricBands(clampedBands)
         }
         if (clamped != null) {
             _bandGains.value = clamped
             markGraphicEqPresetDirty()
         }
+        if (bandsChanged) _parametricBands.value = clampedBands
     }
 
     /** 게인 배열을 ±limit로 clamp(NaN/Inf → 0). [_bandGains]가 항상 라이브 한계 내에 있도록 보장. */
@@ -536,15 +598,144 @@ class AutoEqViewModel(
         }
     }
 
-    private fun applyGraphicEq(gains: FloatArray) {
-        val specs = GraphicEqBands.toSpecs(gains)
+    // ── EQ 모드 / 전역 Q / 파라메트릭 편집 액션 ──────────────────────────────────
+
+    /** EQ 편집 모드 전환. 전환 후 그 모드의 결과가 들리도록(비평탄) USER 청취 모드로 보장. */
+    fun setEqMode(mode: EqMode) {
+        viewModelScope.launch { settings.setEqMode(mode.name) }
+        val specs = currentManualSpecs(mode, _bandGains.value, graphicQScale.value, _parametricBands.value)
+        if (specs.isNotEmpty()) ensureUserListenMode()
+    }
+
+    /** 그래픽 전역 Q 배율(넓게/보통/좁게) 변경 — 허용 옵션으로 스냅 후 영속. 적용은 흐름이 담당. */
+    fun setGraphicQScale(scale: Float) {
+        val snapped = GraphicEqBands.snapQScale(scale)
+        viewModelScope.launch { settings.setGraphicQScale(snapped) }
+        if (eqMode.value == EqMode.GRAPHIC && GraphicEqBands.toSpecs(_bandGains.value, snapped).isNotEmpty()) {
+            ensureUserListenMode()
+        }
+    }
+
+    /**
+     * 파라메트릭 밴드 추가(peaking, 평탄). 상한 [ParametricBand.MAX_BANDS]. 새 밴드를 선택.
+     * 새 밴드는 기존 밴드 사이의 **가장 넓은 주파수 간격(로그)의 중앙**에 배치한다 — 같은 자리에
+     * 겹쳐 점 하나처럼 보이던 문제를 방지하고, 매번 잡기 쉬운 위치에 떨어뜨린다.
+     */
+    fun addParametricBand() {
+        val cur = _parametricBands.value
+        if (cur.size >= ParametricBand.MAX_BANDS) return
+        // 새 밴드에 작은 기본 게인(+3dB, 한계 내)을 줘 추가 즉시 곡선·소리가 변하게 — "추가했는데
+        // 아무 변화 없네?" 혼란 방지(평탄 0dB는 무음이라 currentManualSpecs에서 걸러져 안 들림).
+        val band = ParametricBand.default(java.util.UUID.randomUUID().toString())
+            .copy(
+                freqHz = ParametricBand.nextFreqHz(cur),
+                gainDb = 3f.coerceIn(-gainLimitDb.value, gainLimitDb.value),
+            )
+        _parametricBands.value = cur + band
+        _selectedParametricBandId.value = band.id
+        if (eqMode.value != EqMode.PARAMETRIC) setEqMode(EqMode.PARAMETRIC)
+        ensureUserListenMode()
+    }
+
+    /**
+     * 파라메트릭 밴드의 일부 필드를 갱신(드래그=freq/gain, 슬라이더=Q, 드롭다운=type).
+     * 게인은 라이브 한계([gainLimitDb])로, 나머지는 [ParametricBand] 범위로 clamp.
+     */
+    fun updateParametricBand(
+        id: String,
+        type: Int? = null,
+        freqHz: Float? = null,
+        gainDb: Float? = null,
+        q: Float? = null,
+    ) {
+        val limit = gainLimitDb.value
+        val hpId = com.coreline.audio.EqFilterType.HIGH_PASS.nativeId
+        var changed = false
+        _parametricBands.value = _parametricBands.value.map { b ->
+            if (b.id != id) return@map b
+            changed = true
+            val switchingToHp = type == hpId && b.type != hpId
+            b.copy(
+                type = (type ?: b.type),
+                freqHz = (freqHz ?: b.freqHz),
+                // 게인은 호출자가 새 값을 줄 때만 clamp — 무관한 Q/타입 편집이 기존 게인을 깎지 않게.
+                // 하이패스로 전환 시엔 게인 개념이 없어 0으로 정리(되돌릴 때 옛 부스트가 부활하는 혼란 방지).
+                gainDb = when {
+                    switchingToHp -> 0f
+                    gainDb != null -> gainDb.coerceIn(-limit, limit)
+                    else -> b.gainDb
+                },
+                // 하이패스 전환 시 Q를 0.707(버터워스)로 — 기본 Q=1.0의 컷오프 공진 봉우리 방지.
+                q = when {
+                    q != null -> q
+                    switchingToHp -> 0.707f
+                    else -> b.q
+                },
+            ).normalized()
+        }
+        if (changed) {
+            _selectedParametricBandId.value = id
+            ensureUserListenMode()
+        }
+    }
+
+    /** 파라메트릭 밴드 삭제. 선택돼 있던 밴드면 선택 해제. */
+    fun removeParametricBand(id: String) {
+        _parametricBands.value = _parametricBands.value.filterNot { it.id == id }
+        if (_selectedParametricBandId.value == id) _selectedParametricBandId.value = null
+    }
+
+    /** 파라메트릭 편집기에서 선택 밴드 지정(드래그 핸들/Q 슬라이더 대상). null이면 해제. */
+    fun selectParametricBand(id: String?) {
+        _selectedParametricBandId.value = id
+    }
+
+    /** 파라메트릭 밴드 전체 비움(선택 해제 포함). */
+    fun resetParametricEq() {
+        _parametricBands.value = emptyList()
+        _selectedParametricBandId.value = null
+    }
+
+    /** 사용자가 EQ를 만지면 '내 설정(USER)'으로 자동 전환 — 편집 결과가 즉시 들리게. */
+    private fun ensureUserListenMode() {
+        if (listenMode.value != ListenMode.USER) setListenMode(ListenMode.USER)
+    }
+
+    /**
+     * 현재 모드의 Manual chain 스펙을 계산한다(응답 그래프·엔진 적용 공용).
+     *   GRAPHIC    — 20밴드 peaking(전역 Q 배율 [qScale] 반영, ~평탄 밴드 제외).
+     *   PARAMETRIC — 사용자 정의 타입드 밴드. peaking/shelf는 ~평탄(게인≈0)이면 제외하되
+     *                HIGH_PASS는 게인과 무관하게 항상 동작하므로 유지한다.
+     */
+    private fun currentManualSpecs(
+        mode: EqMode,
+        gains: FloatArray,
+        qScale: Float,
+        bands: List<ParametricBand>,
+    ): List<BiquadSpec> = when (mode) {
+        EqMode.GRAPHIC -> GraphicEqBands.toSpecs(gains, qScale)
+        EqMode.PARAMETRIC -> bands.mapNotNull { b ->
+            val spec = b.toBiquadSpec()
+            if (spec.type == BiquadType.HIGH_PASS || kotlin.math.abs(spec.gainDb) >= 0.05) spec else null
+        }
+    }
+
+    /**
+     * 통합 Manual chain push — 그래픽/파라메트릭 공용. 타입별 계수는 엔진이 [filterTypes]로 분기.
+     * manual on/off enable은 combine(listenMode + manualResponseSpecs)가 단독 소유 — 여기선 값만
+     * push해 이중 writer 경합을 없앤다(값은 항상 push, enable은 combine이 결정).
+     */
+    private fun pushManualSpecs(rawSpecs: List<BiquadSpec>) {
+        // 엔진 Manual 체인 상한(MAX_MANUAL_FILTERS=20) 방어 — 손상/변조/다운그레이드된 복원 데이터가
+        // 20개를 넘겨도 updateManualEq의 require()로 크래시하지 않고 안전하게 절단.
+        val specs = if (rawSpecs.size > AudioEngine.MAX_MANUAL_FILTERS)
+            rawSpecs.take(AudioEngine.MAX_MANUAL_FILTERS) else rawSpecs
         engine.updateManualEq(
             frequencies = FloatArray(specs.size) { specs[it].freqHz.toFloat() },
             gainsDB = FloatArray(specs.size) { specs[it].gainDb.toFloat() },
             qFactors = FloatArray(specs.size) { specs[it].q.toFloat() },
+            filterTypes = IntArray(specs.size) { specs[it].type.toNativeId() },
         )
-        // manual on/off enable은 combine(listenMode+_bandGains)이 단독 소유 — 여기선 값만 push해
-        // 이중 writer 경합을 없앤다(값은 항상 push, enable은 combine이 결정).
     }
 
     /** Phase 6 / P3-C: current native sample rate for the diagnostics card. */
@@ -617,9 +808,16 @@ class AutoEqViewModel(
                 _opraSyncState.value = opraRepository.syncState()
                 if (notify) {
                     _importMessage.value = when (result) {
-                        is OpraSyncResult.NoChange -> "OPRA: 최신 상태"
-                        is OpraSyncResult.Updated -> "OPRA 갱신됨 (제품 ${result.products}, 프로파일 ${result.profiles})"
-                        is OpraSyncResult.Failed -> "OPRA 갱신 실패: ${result.reason}"
+                        is OpraSyncResult.NoChange ->
+                            application.getString(R.string.opra_sync_no_change)
+                        is OpraSyncResult.Updated ->
+                            application.getString(
+                                R.string.opra_sync_updated_format,
+                                result.products,
+                                result.profiles,
+                            )
+                        is OpraSyncResult.Failed ->
+                            application.getString(R.string.opra_sync_failed_format, result.reason)
                     }
                 }
                 result
@@ -633,7 +831,7 @@ class AutoEqViewModel(
         viewModelScope.launch {
             val opra = opraRepository.resolve(entry)
             if (opra == null) {
-                _importMessage.value = "OPRA 프로파일을 찾을 수 없습니다"
+                _importMessage.value = application.getString(R.string.opra_profile_not_found)
                 return@launch
             }
             _opraDetail.value = opra
@@ -653,7 +851,7 @@ class AutoEqViewModel(
         viewModelScope.launch {
             val auto = opra.toAutoEqProfile()
             if (auto == null) {
-                _importMessage.value = "이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)"
+                _importMessage.value = application.getString(R.string.opra_profile_unsupported)
                 return@launch
             }
             deviceManager.applyResolvedProfile(auto)
@@ -669,7 +867,7 @@ class AutoEqViewModel(
         viewModelScope.launch {
             val auto = opraRepository.resolveById(recent.id)?.toAutoEqProfile()
             if (auto == null) {
-                _importMessage.value = "이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)"
+                _importMessage.value = application.getString(R.string.opra_profile_unsupported)
                 return@launch
             }
             deviceManager.applyResolvedProfile(auto)
@@ -755,23 +953,24 @@ class AutoEqViewModel(
             val cleanName = displayName
                 .substringBeforeLast('.', missingDelimiterValue = displayName)
                 .trim()
-                .ifBlank { "Imported profile" }
+                .ifBlank { importedProfileFallback }
             val result = api.importFromUri(uri, cleanName)
             when (result) {
                 is com.coreline.autoeq.model.ParseResult.Success -> {
-                    _importMessage.value = "Imported \"$cleanName\""
+                    _importMessage.value = application.getString(R.string.import_success_format, cleanName)
                     // Auto-select the freshly imported profile.
                     val entry = AutoEqCatalogEntry(
                         id = result.profile.id,
                         name = result.profile.name,
-                        measuredBy = "Imported",
+                        measuredBy = importedSourceLabel,
                         relativePath = "",
                     )
                     selectProfile(entry)
                 }
                 is com.coreline.autoeq.model.ParseResult.Failure -> {
-                    val reason = result.error::class.simpleName ?: "ParseError"
-                    _importMessage.value = "Import failed: $reason"
+                    val reason = result.error::class.simpleName
+                        ?: application.getString(R.string.parse_error_label)
+                    _importMessage.value = application.getString(R.string.import_failure_format, reason)
                 }
             }
         }
@@ -781,7 +980,7 @@ class AutoEqViewModel(
     fun clearNetworkCache() {
         viewModelScope.launch {
             api.repository.clearCache()
-            _importMessage.value = "Cache cleared"
+            _importMessage.value = application.getString(R.string.cache_cleared)
         }
     }
 
@@ -794,20 +993,27 @@ class AutoEqViewModel(
     fun checkProfileUpdates(manual: Boolean = true) {
         viewModelScope.launch {
             if (listenMode.value == ListenMode.ORIGINAL) {
-                if (manual) _importMessage.value = "원음 모드 — 업데이트를 건너뜁니다"
+                if (manual) _importMessage.value =
+                    application.getString(R.string.profile_update_skip_original)
                 return@launch
             }
-            if (manual) _importMessage.value = "프로파일 업데이트 확인 중…"
+            if (manual) _importMessage.value =
+                application.getString(R.string.profile_update_checking)
             val result = withContext(Dispatchers.IO) { api.repository.syncDelta() }
             settings.setLastDeltaCheckMs(System.currentTimeMillis())
             when (result) {
                 is DeltaResult.NoChange ->
-                    if (manual) _importMessage.value = "프로파일이 최신 상태입니다"
+                    if (manual) _importMessage.value =
+                        application.getString(R.string.profile_update_no_change)
                 is DeltaResult.Updated ->
-                    _importMessage.value =
-                        "프로파일 업데이트됨 (변경 ${result.changedProfiles}, 제거 ${result.removedProfiles})"
+                    _importMessage.value = application.getString(
+                        R.string.profile_update_updated_format,
+                        result.changedProfiles,
+                        result.removedProfiles,
+                    )
                 is DeltaResult.Failed ->
-                    if (manual) _importMessage.value = "업데이트 확인 실패: ${result.reason}"
+                    if (manual) _importMessage.value =
+                        application.getString(R.string.profile_update_failed_format, result.reason)
             }
         }
     }

@@ -13,8 +13,8 @@
 [![NDK](https://img.shields.io/badge/NDK-r27.0.12077973-blue?style=flat-square)](#-build-matrix)
 [![16KB pages](https://img.shields.io/badge/16KB%20pages-✓-orange?style=flat-square)](#-correctness-invariants)
 
-[![Tests](https://img.shields.io/badge/Kotlin%20unit-213%20PASS-brightgreen?style=flat-square)](#-testing)
-[![Native tests](https://img.shields.io/badge/native%20suites-7%20PASS-brightgreen?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/Kotlin%20unit-217%20PASS-brightgreen?style=flat-square)](#-testing)
+[![Native tests](https://img.shields.io/badge/native%20suites-8%20PASS-brightgreen?style=flat-square)](#-testing)
 [![DSP parity](https://img.shields.io/badge/scipy.lfilter%20SNR-140--157%20dB-success?style=flat-square)](#-correctness-invariants)
 [![TSan](https://img.shields.io/badge/ThreadSanitizer-clean-success?style=flat-square)](#-correctness-invariants)
 [![R8](https://img.shields.io/badge/R8%20release-PASS-success?style=flat-square)](#-quick-start)
@@ -32,8 +32,9 @@ DSP-accurate biquad cascade · RT-safe atomic publish · Source-level integratio
 - 🎯 **DSP parity verified** — scipy.lfilter SNR 140–157 dB across 44.1k / 48k / 96k; freqz match to 0.0000 dB worst-case.
 - 🛡️ **TSan-clean atomic publish** — heap `EngineSnapshot` + 500 ms deferred retire closes the audio-thread / control-thread race surface end-to-end.
 - ⚡ **Zero-allocation audio callback** — single `acquire` load per buffer, no locks, no Java callbacks across the JNI boundary.
-- 🧪 **213 Kotlin unit (71 engine / 96 autoeq-data / 25 opra-data / 21 app) + 8 native suites** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
-- 🆚 **OPRA comparison + A/B/C listen modes** — second data source (OPRA, CC BY-SA 4.0) bundled offline alongside AutoEq, sharing the same DSP engine; one-tap 원음 / AutoEQ / 내 설정 (profile + graphic EQ) for instant A-B-C auditioning.
+- 🧪 **217 Kotlin unit (71 engine / 96 autoeq-data / 27 opra-data / 23 app) + 8 native suites** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
+- 🆚 **OPRA comparison + A/B/C listen modes** — second data source (OPRA, CC BY-SA 4.0) bundled offline alongside AutoEq, sharing the same DSP engine; one-tap 원음 / EQ 적용 / 내 설정 (profile + graphic EQ) for instant A-B-C auditioning.
+- 🎛️ **Player-first auditioning** — local-file queue persists across restarts, the player exposes 원음/EQ 적용/커스텀 + preamp controls, and the real-time post-EQ spectrum shows bit depth / sample rate.
 - 🧱 **3-layer range validation** — Kotlin `require` → JNI guard → engine bounds-check; cross-language status code surfaces drift as `IllegalStateException`.
 - 🔌 **Source-level integration ready** — `AudioEngine.Builder` enforces sample-rate match, `useInAudioSession` DSL enforces lifecycle, deprecated aliases preserved for downstream binary compat.
 - 📦 **16 KB page-size compatible** — `-Wl,-z,max-page-size=16384` linker flag, verified post-link via `llvm-readelf -l` (`Align 0x4000`).
@@ -147,7 +148,7 @@ adb shell am start -n com.coreline.auraltune/.MainActivity
 
 ```bash
 ./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :opra-data:testDebugUnitTest :app:testDebugUnitTest
-# Expected: 213 tests, all PASS (71 engine / 96 autoeq-data / 25 opra-data / 21 app)
+# Expected: 217 tests, all PASS (71 engine / 96 autoeq-data / 27 opra-data / 23 app)
 ```
 
 ### Run native unit tests (host JVM)
@@ -244,8 +245,8 @@ repo.close()                              // cancels all inflight HTTP work
 |---|---|---|---|
 | `:audio-engine` Kotlin unit | **71** | Robolectric + ShadowAudioEngine | API contracts, lifecycle DSL, builder, range gates, native-create failure, native-update rejection |
 | `:autoeq-data` Kotlin unit | **96** | Robolectric + OkHttp interceptor + in-memory Room | Parsers, caches, DB-first repo (catalog seed, tombstone sweep, profile DB hit/miss/kill-switch, coalescing), search |
-| `:opra-data` Kotlin unit | **25** | Robolectric + in-memory Room | OPRA JSONL parser (join/orphan/malformed), filter-type→engine mapping, Room store, repository (NoChange/Updated/Failed + checksum-mismatch/offline cache-retention), bundled sha256 source + gz-fallback |
-| `:app` Kotlin unit | **21** | Robolectric + JUnit | Graphic-EQ freqz (BiquadResponse) + T2-OS approximation fit (AutoEqApprox) + OpraEngineAdapter + SettingsStore provider-migration + OpraSourcePolicy (release≠GitHub) |
+| `:opra-data` Kotlin unit | **27** | Robolectric + in-memory Room | OPRA JSONL parser (join/orphan/malformed, headphone display-name guard), filter-type→engine mapping, Room store, repository (NoChange/force/Updated/Failed + checksum-mismatch/offline cache-retention), bundled sha256 source + gz-fallback |
+| `:app` Kotlin unit | **23** | Robolectric + JUnit | Graphic-EQ freqz (BiquadResponse), SpectrumAnalyzer FFT/log-band guards, T2-OS approximation fit (AutoEqApprox), OpraEngineAdapter, SettingsStore provider/playback-snapshot migration, OpraSourcePolicy (release≠GitHub) |
 | `:app` instrumented | (on-device) | 3 devices (S25 / PD20 / SP4000T) | End-to-end audio path, rotation, offline DB |
 | Native — `AuralTuneEQEngineTest` | 8 | host g++ | Engine: NaN guard, sample-rate change, validation, snapshot publish, xrun, enable toggle, rapid switching click-free |
 | Native — `RangeValidationTest` | 8 | host g++ | Native-side range bounds, `process()` size validation, applied-snapshot consistency |
@@ -378,8 +379,8 @@ On first launch:
 | **3 — Kotlin parser** | ✅ | BOM / CRLF, NaN reject, comment skip, ≤10 filters, error sealed class |
 | **4 — Catalog / cache / search** | ✅ | LRU 200 / 5 MB, coalescing (LAZY + invokeOnCompletion cleanup), 3-tier fuzzy, telemetry interface |
 | **5 — Per-device persistence** | ✅ | `SettingsStore` + `AudioDeviceCallback` per-device profile selection (device-key). Profiles persisted in Room (`ProfileStore`). |
-| **6 — Playback pipeline + UX** | ✅ | **ExoPlayer (Media3)** + `AuralTuneAudioProcessor` (engine.process inline), diagnostics UI, profile restore on launch, 20-band graphic EQ. Lifecycle owned by retained ViewModel (`onCleared` ordered close). |
-| **7 — Verification** | 🟡 | Native + Kotlin unit tests PASS; on-device verified on 3 devices (S25 / PD20 / SP4000T). Android CI workflow + release-gate doc reconciliation in progress (see `dev-plan/remaining_20260622.md`). |
+| **6 — Playback pipeline + UX** | ✅ | **ExoPlayer (Media3)** + `AuralTuneAudioProcessor` (engine.process inline), persistent queue, realtime spectrum with bit depth/sample rate, diagnostics UI, profile restore on launch, 20-band graphic EQ. Lifecycle owned by retained ViewModel (`onCleared` ordered close). |
+| **7 — Verification** | ✅ | Kotlin unit, release build, release debug/probe marker scan, and 16 KB native alignment gates are documented/automated; on-device spot checks remain manual for device-specific audio routes. |
 
 > Note: the table above is the original **engine/MVP** phase plan. The graphic-EQ + DB-first + release-gate workstream is tracked separately in `dev-plan/implement_20260622_110525.md` (Phases 0–7) and `dev-plan/remaining_20260622.md`.
 

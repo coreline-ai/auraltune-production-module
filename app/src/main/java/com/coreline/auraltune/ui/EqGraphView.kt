@@ -24,21 +24,22 @@ import com.coreline.audio.EqFilterType
 import com.coreline.auraltune.audio.eq.BiquadResponse
 import com.coreline.auraltune.audio.eq.BiquadSpec
 import com.coreline.auraltune.audio.eq.BiquadType
-import com.coreline.auraltune.audio.eq.GraphicEqBands
 import com.coreline.autoeq.model.AutoEqFilter
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.log10
 import kotlin.math.pow
 
-private const val MIN_HZ = 20.0
-private const val MAX_HZ = 20_000.0
+internal const val GRAPH_MIN_HZ = 20.0
+internal const val GRAPH_MAX_HZ = 20_000.0
+private const val MIN_HZ = GRAPH_MIN_HZ
+private const val MAX_HZ = GRAPH_MAX_HZ
 private const val MIN_GRAPH_DB = 15.0    // minimum y-axis half-range (±15 dB)
-private const val SAMPLE_RATE = 48_000.0
+internal const val GRAPH_SAMPLE_RATE = 48_000.0
 private const val CURVE_POINTS = 180
 
 /** Map an AutoEQ profile filter to the graph's BiquadSpec (enum names align 1:1). */
-private fun AutoEqFilter.toSpec(): BiquadSpec = BiquadSpec(
+internal fun AutoEqFilter.toBiquadSpec(): BiquadSpec = BiquadSpec(
     type = when (type) {
         EqFilterType.PEAKING -> BiquadType.PEAKING
         EqFilterType.LOW_SHELF -> BiquadType.LOW_SHELF
@@ -52,9 +53,11 @@ private fun AutoEqFilter.toSpec(): BiquadSpec = BiquadSpec(
 
 @Composable
 fun EqGraphView(
-    bandGains: FloatArray,
+    manualSpecs: List<BiquadSpec>,
     autoEqFilters: List<AutoEqFilter>,
     modifier: Modifier = Modifier,
+    /** Sample rate the curve is computed at — should match the engine's live rate so graph == sound. */
+    sampleRate: Double = GRAPH_SAMPLE_RATE,
     /** Active profile preamp (dB, usually negative). Drawn as a horizontal reference line. */
     preampDb: Float = 0f,
     /** Whether to overlay the preamp reference line (marker). */
@@ -73,14 +76,13 @@ fun EqGraphView(
         }
     }
 
-    val manualSpecs = remember(bandGains) { GraphicEqBands.toSpecs(bandGains) }
-    val autoSpecs = remember(autoEqFilters) { autoEqFilters.map { it.toSpec() } }
+    val autoSpecs = remember(autoEqFilters) { autoEqFilters.map { it.toBiquadSpec() } }
 
-    val composite = remember(manualSpecs, autoSpecs) {
-        BiquadResponse.compositeDb(freqs, manualSpecs + autoSpecs, SAMPLE_RATE)
+    val composite = remember(manualSpecs, autoSpecs, sampleRate) {
+        BiquadResponse.compositeDb(freqs, manualSpecs + autoSpecs, sampleRate)
     }
-    val autoCurve = remember(autoSpecs) {
-        if (autoSpecs.isEmpty()) null else BiquadResponse.compositeDb(freqs, autoSpecs, SAMPLE_RATE)
+    val autoCurve = remember(autoSpecs, sampleRate) {
+        if (autoSpecs.isEmpty()) null else BiquadResponse.compositeDb(freqs, autoSpecs, sampleRate)
     }
     val curveShift = if (preampApplied) preampDb.toDouble() else 0.0
     val graphMaxDb = remember(composite, autoCurve, preampDb, showPreamp, curveShift) {

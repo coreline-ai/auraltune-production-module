@@ -15,6 +15,26 @@ import kotlin.math.sqrt
 
 enum class BiquadType { PEAKING, LOW_SHELF, HIGH_SHELF, HIGH_PASS }
 
+/**
+ * Native filter-type id — matches the C++ `EqFilterType` enum AND
+ * [com.coreline.audio.EqFilterType.nativeId] (0=PK, 1=LS, 2=HS, 3=HP). Kept as an explicit,
+ * stable wire format so persisted parametric bands survive any enum-ordinal churn.
+ */
+fun biquadTypeFromNativeId(id: Int): BiquadType = when (id) {
+    1 -> BiquadType.LOW_SHELF
+    2 -> BiquadType.HIGH_SHELF
+    3 -> BiquadType.HIGH_PASS
+    else -> BiquadType.PEAKING
+}
+
+/** Inverse of [biquadTypeFromNativeId]; feeds AudioEngine.updateManualEq's filterTypes. */
+fun BiquadType.toNativeId(): Int = when (this) {
+    BiquadType.PEAKING -> 0
+    BiquadType.LOW_SHELF -> 1
+    BiquadType.HIGH_SHELF -> 2
+    BiquadType.HIGH_PASS -> 3
+}
+
 /** One biquad section. gainDb is ignored for HIGH_PASS. */
 data class BiquadSpec(
     val type: BiquadType,

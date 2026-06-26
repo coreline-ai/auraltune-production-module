@@ -221,6 +221,22 @@ jobs:
         timeout-minutes: 15
         run: ./gradlew :app:assembleRelease
 
+      - name: Verify release APK has no debug/probe dex markers
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release-unsigned.apk
+          if [ ! -f "$APK" ]; then
+            echo "::error::release APK not found: $APK"
+            exit 1
+          fi
+          ANALYZER="$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer"
+          MARKERS='AudioFxSessionProbe|DebugSupport|firstPlayableUri|debug firstAudioUri|EqState|외부앱 신호 측정|pushToEngine'
+          if "$ANALYZER" dex packages "$APK" | grep -E "$MARKERS"; then
+            echo "::error::Debug/probe marker leaked into release dex"
+            exit 1
+          fi
+          echo "OK: no debug/probe dex markers in release APK"
+
       # ────────────────────────────────────────────────────────────────────────
       # Phase 0 P0-4: 16 KB page-size verification on the release arm64-v8a .so.
       # ────────────────────────────────────────────────────────────────────────

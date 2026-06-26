@@ -120,6 +120,7 @@ public:
     int updateManualEq(const float* frequencies,
                        const float* gainsDB,
                        const float* qs,
+                       const int* types,
                        int count);
 
     // Enable/disable the AutoEQ correction. By default the transition is
@@ -355,9 +356,10 @@ private:
     // Manual EQ params (raw user input — used to recompute coefficients on
     // sample-rate change).
     struct ManualParams {
-        float frequency = 1000.0f;
-        float gainDB    = 0.0f;
-        float q         = 1.0f;
+        EqFilterType type = EqFilterType::Peaking;
+        float frequency   = 1000.0f;
+        float gainDB      = 0.0f;
+        float q           = 1.0f;
     };
     std::array<ManualParams, kMaxManualFilters> manualParams_{};
     int manualActiveCount_ = 0;

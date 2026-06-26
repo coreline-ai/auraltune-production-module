@@ -195,39 +195,46 @@ Java_com_coreline_audio_AudioEngine_nativeUpdateManualEq(JNIEnv* env,
                                                          jlong handle,
                                                          jfloatArray frequencies,
                                                          jfloatArray gainsDB,
-                                                         jfloatArray qFactors) {
+                                                         jfloatArray qFactors,
+                                                         jintArray types) {
     auto* engine = fromHandle(handle);
     if (engine == nullptr) return -1;
-    if (frequencies == nullptr || gainsDB == nullptr || qFactors == nullptr) {
+    if (frequencies == nullptr || gainsDB == nullptr || qFactors == nullptr || types == nullptr) {
         return -1;
     }
 
     const jsize fCount = env->GetArrayLength(frequencies);
     const jsize gCount = env->GetArrayLength(gainsDB);
     const jsize qCount = env->GetArrayLength(qFactors);
-    if (fCount != gCount || gCount != qCount) return -1;
+    const jsize tCount = env->GetArrayLength(types);
+    if (fCount != gCount || gCount != qCount || qCount != tCount) return -1;
     if (fCount < 0 || fCount > kMaxManualFilters) return -1;
 
     if (fCount == 0) {
-        return engine->updateManualEq(nullptr, nullptr, nullptr, 0);
+        return engine->updateManualEq(nullptr, nullptr, nullptr, nullptr, 0);
     }
 
     jfloat* freqs = env->GetFloatArrayElements(frequencies, nullptr);
     jfloat* gains = env->GetFloatArrayElements(gainsDB, nullptr);
     jfloat* qs    = env->GetFloatArrayElements(qFactors, nullptr);
+    jint*   tys   = env->GetIntArrayElements(types, nullptr);
 
-    if (freqs == nullptr || gains == nullptr || qs == nullptr) {
+    if (freqs == nullptr || gains == nullptr || qs == nullptr || tys == nullptr) {
         if (freqs) env->ReleaseFloatArrayElements(frequencies, freqs, JNI_ABORT);
         if (gains) env->ReleaseFloatArrayElements(gainsDB, gains, JNI_ABORT);
         if (qs)    env->ReleaseFloatArrayElements(qFactors, qs, JNI_ABORT);
+        if (tys)   env->ReleaseIntArrayElements(types, tys, JNI_ABORT);
         return -1;
     }
 
-    const int rc = engine->updateManualEq(freqs, gains, qs, static_cast<int>(fCount));
+    const int rc = engine->updateManualEq(freqs, gains, qs,
+                                          reinterpret_cast<const int*>(tys),
+                                          static_cast<int>(fCount));
 
     env->ReleaseFloatArrayElements(frequencies, freqs, JNI_ABORT);
     env->ReleaseFloatArrayElements(gainsDB, gains, JNI_ABORT);
     env->ReleaseFloatArrayElements(qFactors, qs, JNI_ABORT);
+    env->ReleaseIntArrayElements(types, tys, JNI_ABORT);
     return rc;
 }
 
