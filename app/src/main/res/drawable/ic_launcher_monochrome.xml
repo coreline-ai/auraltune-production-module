@@ -1,0 +1,13 @@
+<!-- Monochrome layer for Android 13+ themed icons. Same EQ-bars glyph; the system
+     re-tints it, so a single opaque color (alpha is what matters) is used here. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M30,42 L30,66" android:strokeColor="#000000" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M42,30 L42,78" android:strokeColor="#000000" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M54,36 L54,72" android:strokeColor="#000000" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M66,28 L66,80" android:strokeColor="#000000" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M78,44 L78,64" android:strokeColor="#000000" android:strokeWidth="8" android:strokeLineCap="round" />
+</vector>

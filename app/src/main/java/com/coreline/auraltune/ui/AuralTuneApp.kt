@@ -138,6 +138,13 @@ fun AuralTuneApp() {
         var selectedTab by rememberSaveable { mutableStateOf(AppTab.PLAYER) }
 
         val playback by musicController.state.collectAsState()
+        LaunchedEffect(playback.playbackError) {
+            val msg = playback.playbackError
+            if (msg != null) {
+                snackbarHostState.showSnackbar(msg)
+                musicController.consumePlaybackError()
+            }
+        }
         val opraDetail by vm.opraDetail.collectAsState()
         val opraSyncState by vm.opraSyncState.collectAsState()
         // '현재 사용중'(실제 엔진 적용) 프로파일 = 활성 provider의 선택. 플레이어·미니 배지에 사용.

@@ -203,7 +203,11 @@ fun ParametricEqCard(
                     ),
                     contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = stringResource(R.string.parametric_eq_add),
+                        modifier = Modifier.size(18.dp),
+                    )
                     Spacer(Modifier.width(8.dp))
                     Text(stringResource(R.string.parametric_eq_add), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }

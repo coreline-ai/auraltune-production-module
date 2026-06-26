@@ -49,9 +49,7 @@ class AuralTuneAudioProcessor(
     }
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
-        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT &&
-            inputAudioFormat.encoding != C.ENCODING_PCM_FLOAT
-        ) {
+        if (!isSupportedPcmEncoding(inputAudioFormat.encoding)) {
             throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
         }
 
@@ -62,6 +60,8 @@ class AuralTuneAudioProcessor(
             engine.updateSampleRate(inputAudioFormat.sampleRate)
         }
         analyzer?.setSampleRate(inputAudioFormat.sampleRate) // 스펙트럼 주파수 매핑용
+        onFormatChanged?.invoke(inputAudioFormat.sampleRate, bitDepthOf(inputAudioFormat.encoding))
+
         onFormatChanged?.invoke(inputAudioFormat.sampleRate, bitDepthOf(inputAudioFormat.encoding))
 
         // ALWAYS output 16-bit PCM regardless of input encoding. DefaultAudioSink's
@@ -81,24 +81,16 @@ class AuralTuneAudioProcessor(
         if (byteCount == 0) return
 
         val channels = inputAudioFormat.channelCount
-        val is16 = inputAudioFormat.encoding == C.ENCODING_PCM_16BIT
-        val frames = if (is16) byteCount / (2 * channels) else byteCount / (4 * channels)
+        val bytesPerSample = pcmBytesPerSample(inputAudioFormat.encoding)
+        val frames = byteCount / (bytesPerSample * channels)
         val samples = frames * channels
 
         // Gather input into a direct float scratch buffer for the engine.
         val fs = scratch(samples * 4)
-        if (is16) {
-            var i = position
-            while (i < limit) {
-                fs.putFloat(inputBuffer.getShort(i) / 32768.0f)
-                i += 2
-            }
-        } else {
-            var i = position
-            while (i < limit) {
-                fs.putFloat(inputBuffer.getFloat(i))
-                i += 4
-            }
+        var i = position
+        repeat(samples) {
+            fs.putFloat(pcmSampleToFloat(inputBuffer, i, inputAudioFormat.encoding))
+            i += bytesPerSample
         }
         inputBuffer.position(limit)
 
@@ -126,7 +118,51 @@ class AuralTuneAudioProcessor(
 
     private fun bitDepthOf(encoding: Int): Int = when (encoding) {
         C.ENCODING_PCM_16BIT -> 16
+        C.ENCODING_PCM_24BIT -> 24
+        C.ENCODING_PCM_32BIT -> 32
         C.ENCODING_PCM_FLOAT -> 32
         else -> 0
     }
+}
+
+private fun isSupportedPcmEncoding(encoding: Int): Boolean =
+    encoding == C.ENCODING_PCM_16BIT ||
+        encoding == C.ENCODING_PCM_24BIT ||
+        encoding == C.ENCODING_PCM_32BIT ||
+        encoding == C.ENCODING_PCM_FLOAT
+
+private fun pcmBytesPerSample(encoding: Int): Int = when (encoding) {
+    C.ENCODING_PCM_16BIT -> 2
+    C.ENCODING_PCM_24BIT -> 3
+    C.ENCODING_PCM_32BIT,
+    C.ENCODING_PCM_FLOAT -> 4
+    else -> error("unsupported PCM encoding=$encoding")
+}
+
+internal fun pcmSampleToFloat(input: ByteBuffer, offset: Int, encoding: Int): Float = when (encoding) {
+    C.ENCODING_PCM_16BIT -> {
+        val lo = input.get(offset).toInt() and 0xFF
+        val hi = input.get(offset + 1).toInt()
+        (lo or (hi shl 8)).toShort().toInt() / 32768.0f
+    }
+    C.ENCODING_PCM_24BIT -> {
+        val b0 = input.get(offset).toInt() and 0xFF
+        val b1 = input.get(offset + 1).toInt() and 0xFF
+        val b2 = input.get(offset + 2).toInt() and 0xFF
+        val raw = b0 or (b1 shl 8) or (b2 shl 16)
+        val signed = if ((raw and 0x00800000) != 0) raw or -0x01000000 else raw
+        signed / 8388608.0f
+    }
+    C.ENCODING_PCM_32BIT -> {
+        val b0 = input.get(offset).toInt() and 0xFF
+        val b1 = input.get(offset + 1).toInt() and 0xFF
+        val b2 = input.get(offset + 2).toInt() and 0xFF
+        val b3 = input.get(offset + 3).toInt()
+        val signed = b0 or (b1 shl 8) or (b2 shl 16) or (b3 shl 24)
+        signed / 2147483648.0f
+    }
+    C.ENCODING_PCM_FLOAT -> input.duplicate()
+        .order(ByteOrder.LITTLE_ENDIAN)
+        .getFloat(offset)
+    else -> error("unsupported PCM encoding=$encoding")
 }

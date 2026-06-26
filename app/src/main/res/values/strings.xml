@@ -3,9 +3,9 @@
     <string name="app_name">AuralTune</string>
 
     <!-- Catalog state -->
-    <string name="catalog_loading">Loading headphone catalog…</string>
-    <string name="catalog_offline">Offline — using cached catalog</string>
-    <string name="catalog_stale_format">Last updated %s ago</string>
+    <string name="catalog_loading">헤드폰 카탈로그 불러오는 중…</string>
+    <string name="catalog_offline">오프라인 — 캐시된 카탈로그 사용 중</string>
+    <string name="catalog_stale_format">마지막 업데이트: %s 전</string>
 
     <!-- Bottom navigation -->
     <string name="tab_player">플레이어</string>
@@ -32,12 +32,14 @@
     <string name="player_queue_item_idle">재생목록 항목</string>
     <string name="player_queue_item_selected">현재 선택된 곡</string>
     <string name="player_queue_item_playing">현재 재생 중</string>
-    <string name="imported_profile_fallback">Imported profile</string>
-    <string name="imported_source_label">Imported</string>
-    <string name="import_success_format">Imported "%1$s"</string>
-    <string name="import_failure_format">Import failed: %1$s</string>
-    <string name="parse_error_label">ParseError</string>
-    <string name="cache_cleared">Cache cleared</string>
+    <string name="player_unknown_track">선택한 파일</string>
+    <string name="player_error_failed_track_format">재생할 수 없어 목록에서 제외했습니다: %1$s (%2$s)</string>
+    <string name="imported_profile_fallback">가져온 프로파일</string>
+    <string name="imported_source_label">가져옴</string>
+    <string name="import_success_format">"%1$s" 가져오기 완료</string>
+    <string name="import_failure_format">가져오기 실패: %1$s</string>
+    <string name="parse_error_label">파싱 오류</string>
+    <string name="cache_cleared">캐시를 비웠습니다</string>
 
     <!-- Bluetooth permission notice -->
     <string name="bt_permission_title">블루투스 기기 식별 권한</string>
@@ -46,10 +48,10 @@
     <string name="bt_permission_later">나중에</string>
 
     <!-- Search -->
-    <string name="search_placeholder">Search headphones…</string>
-    <string name="no_results">No headphones found</string>
-    <string name="search_prompt">Type a model name to search, or pick from the quick-select above</string>
-    <string name="clear_search">Clear search</string>
+    <string name="search_placeholder">헤드폰 검색…</string>
+    <string name="no_results">검색 결과가 없습니다</string>
+    <string name="search_prompt">모델명을 입력하거나 위의 빠른 선택에서 고르세요</string>
+    <string name="clear_search">검색어 지우기</string>
     <string name="profile_picker_expand">프로파일 목록 열기</string>
     <string name="profile_picker_title">프로파일 선택</string>
     <string name="profile_picker_placeholder">최근 프로파일에서 선택</string>
@@ -61,39 +63,39 @@
     <string name="profile_update_failed_format">업데이트 확인 실패: %1$s</string>
 
     <!-- Status card -->
-    <string name="no_correction_active">No correction active</string>
-    <string name="import_button">Import EQ</string>
-    <string name="correction_toggle">AutoEQ correction</string>
-    <string name="preamp_toggle">AutoEQ preamp</string>
-    <string name="clear_selection">Clear selection</string>
-    <string name="favorite_toggle">Favorite</string>
+    <string name="no_correction_active">적용 중인 보정 없음</string>
+    <string name="import_button">EQ 가져오기</string>
+    <string name="correction_toggle">AutoEQ 보정</string>
+    <string name="preamp_toggle">AutoEQ 프리앰프</string>
+    <string name="clear_selection">선택 해제</string>
+    <string name="favorite_toggle">즐겨찾기</string>
     <string name="in_use_badge">현재 사용중</string>
     <string name="status_profile_icon">선택된 보정 프로파일</string>
 
     <!-- Diagnostics card -->
-    <string name="diagnostics_title">Diagnostics</string>
-    <string name="diagnostics_xrun">xrun count</string>
-    <string name="diagnostics_non_finite">non-finite reset count</string>
-    <string name="diagnostics_config_swap">config swap count</string>
-    <string name="diagnostics_sample_rate">sample-rate change count</string>
+    <string name="diagnostics_title">진단 정보</string>
+    <string name="diagnostics_xrun">xrun 횟수</string>
+    <string name="diagnostics_non_finite">비정상 값 리셋 횟수</string>
+    <string name="diagnostics_config_swap">설정 교체 횟수</string>
+    <string name="diagnostics_sample_rate">샘플레이트 변경 횟수</string>
 
     <!-- Cache -->
-    <string name="clear_cache">Clear cache</string>
-    <string name="clear_cache_button">Clear cache</string>
+    <string name="clear_cache">캐시 비우기</string>
+    <string name="clear_cache_button">캐시 비우기</string>
 
     <!-- Diagnostics extras (P3-C) -->
-    <string name="diagnostics_device">device</string>
-    <string name="diagnostics_sample_rate_now">current sample rate</string>
-    <string name="diagnostics_total_frames">total processed frames</string>
-    <string name="diagnostics_no_device">— no eligible device —</string>
-    <string name="diagnostics_autoeq_active_filters">AutoEQ active filters</string>
-    <string name="diagnostics_applied_generation">Applied generation</string>
+    <string name="diagnostics_device">기기</string>
+    <string name="diagnostics_sample_rate_now">현재 샘플레이트</string>
+    <string name="diagnostics_total_frames">총 처리 프레임</string>
+    <string name="diagnostics_no_device">— 적용 가능한 기기 없음 —</string>
+    <string name="diagnostics_autoeq_active_filters">활성 AutoEQ 필터</string>
+    <string name="diagnostics_applied_generation">적용 세대</string>
     <string name="diagnostics_expand">진단 정보 펼치기</string>
     <string name="diagnostics_collapse">진단 정보 접기</string>
 
     <!-- Kill switch (P2-E) — folded into the listen-mode bar (원음); kept for reference -->
-    <string name="kill_switch_label">Kill switch</string>
-    <string name="kill_switch_hint">Bypass all DSP — engine becomes pure passthrough</string>
+    <string name="kill_switch_label">킬 스위치</string>
+    <string name="kill_switch_hint">모든 DSP를 우회해 순수 패스스루로 전환합니다</string>
 
     <!-- Listen-mode A/B/C compare bar -->
     <string name="listen_mode_title">비교 모드</string>
@@ -139,6 +141,7 @@
     <string name="parametric_eq_delete">밴드 삭제</string>
     <string name="parametric_eq_select_hint">그래프의 점을 탭해 선택하고, 위아래로 드래그해 게인·주파수를 조절합니다.</string>
     <string name="parametric_eq_max_reached">최대 %1$d개까지 추가할 수 있습니다.</string>
+    <string name="manual_eq_apply_failed_format">EQ 적용 실패: 엔진이 수동 EQ 업데이트를 거부했습니다 (%1$d)</string>
     <!-- 응답 그래프 범례 -->
     <string name="legend_my_eq">내 EQ</string>
     <string name="legend_profile">프로파일</string>
@@ -149,10 +152,10 @@
     <string name="filter_type_high_pass">하이패스</string>
 
     <!-- Attribution (Phase 7 release task) -->
-    <string name="autoeq_attribution">Headphone correction profiles courtesy of Jaakko Pasanen\'s AutoEq project (MIT License)</string>
+    <string name="autoeq_attribution">헤드폰 보정 프로파일 제공: Jaakko Pasanen의 AutoEq 프로젝트 (MIT License)</string>
 
     <!-- About / 정보 (Phase 5: license & attribution) -->
-    <string name="about_title">About &amp; licenses</string>
+    <string name="about_title">정보 및 라이선스</string>
     <string name="about_app_version">AuralTune %1$s</string>
     <string name="about_expand">정보와 라이선스 펼치기</string>
     <string name="about_collapse">정보와 라이선스 접기</string>
@@ -180,6 +183,7 @@
     <string name="opra_sync_failed_format">OPRA 갱신 실패: %1$s</string>
     <string name="opra_profile_not_found">OPRA 프로파일을 찾을 수 없습니다</string>
     <string name="opra_profile_unsupported">이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)</string>
+    <string name="profile_apply_ineligible_route">현재 출력 장치에서는 헤드폰 보정을 적용하지 않습니다</string>
     <string name="opra_profile_picker_title">OPRA 프로파일 선택</string>
     <string name="opra_profile_picker_placeholder">최근 OPRA 프로파일에서 선택</string>
     <string name="opra_empty_loading">OPRA 데이터를 불러오는 중…</string>
@@ -196,5 +200,6 @@
     <string name="opra_detail_close">Close</string>
     <!-- EQ-detail footnote: indicate changes (format conversion) + no-endorsement, per CC BY-SA 4.0. -->
     <string name="opra_detail_notice">OPRA-derived: format-converted for playback, original values preserved. Not affiliated with OPRA / Roon Labs.</string>
-    <string name="opra_link_open_failed">No app found to open the link</string>
+    <string name="opra_restore_ineligible_route">저장된 OPRA 프로파일은 유지했지만 현재 출력 장치에는 적용하지 않았습니다</string>
+    <string name="opra_link_open_failed">링크를 열 수 있는 앱을 찾지 못했습니다</string>
 </resources>

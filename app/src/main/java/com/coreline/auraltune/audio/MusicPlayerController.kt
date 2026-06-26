@@ -28,6 +28,7 @@ import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import com.coreline.audio.AudioEngine
 import com.coreline.auraltune.BuildConfig
+import com.coreline.auraltune.R
 import com.coreline.auraltune.data.PlaybackSnapshot
 import com.coreline.auraltune.data.PlaybackTrack
 import com.coreline.auraltune.data.SettingsStore
@@ -57,6 +58,7 @@ data class PlaybackUiState(
     val currentIndex: Int = -1,
     val audioBitDepth: Int? = null,
     val audioSampleRateHz: Int? = null,
+    val playbackError: String? = null,
 )
 
 @UnstableApi
@@ -107,6 +109,7 @@ class MusicPlayerController(
                 addListener(object : Player.Listener {
                     override fun onPlayerError(error: PlaybackException) {
                         if (BuildConfig.DEBUG) Log.e(TAG, "player error: ${error.errorCodeName}", error)
+                        handlePlayerError(error)
                     }
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (BuildConfig.DEBUG) Log.i(TAG, "state=$playbackState (1=IDLE 2=BUFFERING 3=READY 4=ENDED)")
@@ -144,7 +147,7 @@ class MusicPlayerController(
         player.setMediaItems(queue.map(::toMediaItem), startIndex.coerceIn(0, queue.lastIndex), 0L)
         player.prepare()
         player.playWhenReady = true
-        publish()
+        publish(playbackError = null)
         saveSnapshot()
     }
 
@@ -163,7 +166,7 @@ class MusicPlayerController(
             player.prepare()
             player.playWhenReady = true
         }
-        publish()
+        publish(playbackError = null)
         saveSnapshot()
     }
 
@@ -196,7 +199,7 @@ class MusicPlayerController(
         queue = emptyList()
         currentAudioBitDepth = null
         currentAudioSampleRateHz = null
-        publish()
+        publish(playbackError = null)
         saveSnapshot()
     }
 
@@ -207,6 +210,12 @@ class MusicPlayerController(
     fun resume() = startPlayback()
     fun seekTo(ms: Long) { player.seekTo(ms.coerceAtLeast(0L)); publish() }
     fun stop() { player.stop() }
+
+    fun consumePlaybackError() {
+        if (_state.value.playbackError != null) {
+            _state.value = _state.value.copy(playbackError = null)
+        }
+    }
 
     /**
      * 재생 시작/재개. IDLE이면 재prepare, **큐 끝(ENDED)이면 처음(0번 곡 0초)으로 되감아** 다시 재생한다.
@@ -253,7 +262,7 @@ class MusicPlayerController(
         ticker = null
     }
 
-    private fun publish() {
+    private fun publish(playbackError: String? = _state.value.playbackError) {
         val idx = player.currentMediaItemIndex
         val title = player.mediaMetadata.title?.toString()
             ?: queue.getOrNull(idx)?.title
@@ -268,7 +277,45 @@ class MusicPlayerController(
             currentIndex = if (queue.isEmpty()) -1 else idx,
             audioBitDepth = currentAudioBitDepth,
             audioSampleRateHz = currentAudioSampleRateHz,
+            playbackError = playbackError,
         )
+    }
+
+    private fun handlePlayerError(error: PlaybackException) {
+        stopTicker()
+        val failedIndex = player.currentMediaItemIndex.takeIf { it in queue.indices }
+        val failed = failedIndex?.let { queue[it] }
+        val failedTitle = failed?.title ?: appContext.getString(R.string.player_unknown_track)
+        val shouldContinue = player.playWhenReady
+        val message = appContext.getString(
+            R.string.player_error_failed_track_format,
+            failedTitle,
+            error.errorCodeName,
+        )
+
+        if (failedIndex != null && failed != null) {
+            queue = queue.toMutableList().apply { removeAt(failedIndex) }
+            if (queue.none { it.uri == failed.uri }) releaseRead(failed.uri)
+            if (queue.isNotEmpty()) {
+                val nextIndex = failedIndex.coerceAtMost(queue.lastIndex)
+                player.setMediaItems(queue.map(::toMediaItem), nextIndex, 0L)
+                player.prepare()
+                player.playWhenReady = shouldContinue
+            } else {
+                player.clearMediaItems()
+                currentAudioBitDepth = null
+                currentAudioSampleRateHz = null
+            }
+        } else {
+            player.clearMediaItems()
+            queue = emptyList()
+            currentAudioBitDepth = null
+            currentAudioSampleRateHz = null
+        }
+
+        if (BuildConfig.DEBUG) Log.w(TAG, "removed failed track after ${error.errorCodeName}: $failedTitle")
+        saveSnapshot()
+        publish(playbackError = message)
     }
 
     /** Resolve a human title from a SAF/content uri (DISPLAY_NAME), falling back to the path. */

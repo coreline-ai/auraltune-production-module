@@ -25,6 +25,7 @@ import com.coreline.auraltune.audio.eq.BiquadType
 import com.coreline.auraltune.audio.eq.EqMode
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 import com.coreline.auraltune.audio.eq.toNativeId
+import com.coreline.auraltune.audio.eq.updateParametricBandModel
 import com.coreline.auraltune.opra.OpraSyncResult
 import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.opra.model.OpraEqProfile
@@ -239,6 +240,9 @@ class AutoEqViewModel(
     private val _parametricBands = MutableStateFlow<List<ParametricBand>>(emptyList())
     val parametricBands: StateFlow<List<ParametricBand>> = _parametricBands.asStateFlow()
 
+    /** Last native Manual EQ update status. If native rejects a chain, keep manual bypassed. */
+    private val _manualEqNativeApplied = MutableStateFlow(true)
+
     /** 파라메트릭 편집기에서 현재 선택된 밴드 id(드래그/Q 슬라이더/타입 변경 대상). 비영속. */
     private val _selectedParametricBandId = MutableStateFlow<String?>(null)
     val selectedParametricBandId: StateFlow<String?> = _selectedParametricBandId.asStateFlow()
@@ -361,15 +365,22 @@ class AutoEqViewModel(
         // manual on/off의 단독 소유자가 되어 pushManualSpecs와의 이중 writer 경합도 없앤다.
         // (engine.setAutoEqEnabled는 값 불변이면 early-return이라 틱마다 호출돼도 무해.)
         viewModelScope.launch {
-            combine(listenMode, preampEnabled, manualResponseSpecs) { mode, preamp, specs ->
-                Triple(mode, preamp, specs)
-            }.collect { (mode, preamp, specs) ->
+            combine(
+                listenMode,
+                preampEnabled,
+                manualResponseSpecs,
+                _manualEqNativeApplied,
+            ) { mode, preamp, specs, manualNativeOk ->
+                ManualEnableState(mode, preamp, specs, manualNativeOk)
+            }.collect { state ->
+                val mode = state.mode
+                val specs = state.specs
                 val auto = mode != ListenMode.ORIGINAL
-                val manual = mode == ListenMode.USER && specs.isNotEmpty()
+                val manual = mode == ListenMode.USER && specs.isNotEmpty() && state.manualNativeOk
                 // 비교용 전환이지만 클릭 방지를 위해 0.5s 크로스페이드 사용(immediate=false).
                 engine.setAutoEqEnabled(auto, immediate = false)
                 engine.setManualEqEnabled(manual)
-                engine.setAutoEqPreampEnabled(auto && preamp)
+                engine.setAutoEqPreampEnabled(auto && state.preampEnabled)
                 // 원음 청취 중엔 백그라운드 카탈로그/프로파일 fetch를 멈춘다(기존 킬스위치 의미 계승).
                 api.repository.setKillSwitchEngaged(mode == ListenMode.ORIGINAL)
             }
@@ -449,7 +460,10 @@ class AutoEqViewModel(
             val auto = opraRepository.resolveById(id)?.toAutoEqProfile() ?: return@launch
             _selectedOpraProfile.value = auto.validated()
             if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) {
-                deviceManager.applyResolvedProfile(auto)
+                if (!deviceManager.applyResolvedProfile(auto)) {
+                    settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+                    _importMessage.value = application.getString(R.string.opra_restore_ineligible_route)
+                }
             }
         }
         // 최초 1회: 최근 프로파일이 비어 있으면 카탈로그 Loaded 시점에 큐레이션 10개를 pre-seed.
@@ -525,12 +539,11 @@ class AutoEqViewModel(
         val arr = _bandGains.value
         val needsClamp = arr.any { it > snapped || it < -snapped }
         val clamped = if (needsClamp) clampToLimit(arr, snapped) else null
-        // 파라메트릭 밴드도 새 한계로 즉시 재클램프(그래픽과 동일 규칙). 안 하면 보이는 값(±한계로 표시)과
-        // 실제 적용 게인이 어긋난다. HP는 게인 개념이 없으므로 제외.
-        val hpId = com.coreline.audio.EqFilterType.HIGH_PASS.nativeId
+        // 파라메트릭 밴드도 새 한계로 즉시 재클램프(그래픽과 동일 규칙). HP도 숨겨진 gain을
+        // clamp해 둬야 이후 shelf/peaking으로 되돌릴 때 이전 큰 gain이 되살아나지 않는다.
         val curBands = _parametricBands.value
         val clampedBands = curBands.map { b ->
-            if (b.type == hpId) b else b.copy(gainDb = b.gainDb.coerceIn(-snapped, snapped))
+            b.copy(gainDb = b.gainDb.coerceIn(-snapped, snapped))
         }
         val bandsChanged = clampedBands != curBands
         viewModelScope.launch {
@@ -649,29 +662,18 @@ class AutoEqViewModel(
         q: Float? = null,
     ) {
         val limit = gainLimitDb.value
-        val hpId = com.coreline.audio.EqFilterType.HIGH_PASS.nativeId
         var changed = false
         _parametricBands.value = _parametricBands.value.map { b ->
             if (b.id != id) return@map b
             changed = true
-            val switchingToHp = type == hpId && b.type != hpId
-            b.copy(
-                type = (type ?: b.type),
-                freqHz = (freqHz ?: b.freqHz),
-                // 게인은 호출자가 새 값을 줄 때만 clamp — 무관한 Q/타입 편집이 기존 게인을 깎지 않게.
-                // 하이패스로 전환 시엔 게인 개념이 없어 0으로 정리(되돌릴 때 옛 부스트가 부활하는 혼란 방지).
-                gainDb = when {
-                    switchingToHp -> 0f
-                    gainDb != null -> gainDb.coerceIn(-limit, limit)
-                    else -> b.gainDb
-                },
-                // 하이패스 전환 시 Q를 0.707(버터워스)로 — 기본 Q=1.0의 컷오프 공진 봉우리 방지.
-                q = when {
-                    q != null -> q
-                    switchingToHp -> 0.707f
-                    else -> b.q
-                },
-            ).normalized()
+            updateParametricBandModel(
+                band = b,
+                type = type,
+                freqHz = freqHz,
+                gainDb = gainDb,
+                q = q,
+                gainLimitDb = limit,
+            )
         }
         if (changed) {
             _selectedParametricBandId.value = id
@@ -730,13 +732,33 @@ class AutoEqViewModel(
         // 20개를 넘겨도 updateManualEq의 require()로 크래시하지 않고 안전하게 절단.
         val specs = if (rawSpecs.size > AudioEngine.MAX_MANUAL_FILTERS)
             rawSpecs.take(AudioEngine.MAX_MANUAL_FILTERS) else rawSpecs
-        engine.updateManualEq(
+        val result = engine.updateManualEq(
             frequencies = FloatArray(specs.size) { specs[it].freqHz.toFloat() },
             gainsDB = FloatArray(specs.size) { specs[it].gainDb.toFloat() },
             qFactors = FloatArray(specs.size) { specs[it].q.toFloat() },
             filterTypes = IntArray(specs.size) { specs[it].type.toNativeId() },
         )
+        if (result != 0) {
+            _manualEqNativeApplied.value = false
+            engine.setManualEqEnabled(false)
+            runCatching {
+                engine.updateManualEq(FloatArray(0), FloatArray(0), FloatArray(0), IntArray(0))
+            }
+            _importMessage.value = application.getString(R.string.manual_eq_apply_failed_format, result)
+            if (BuildConfig.DEBUG) {
+                android.util.Log.w("AutoEqViewModel", "updateManualEq failed: rc=$result count=${specs.size}")
+            }
+        } else {
+            _manualEqNativeApplied.value = true
+        }
     }
+
+    private data class ManualEnableState(
+        val mode: ListenMode,
+        val preampEnabled: Boolean,
+        val specs: List<BiquadSpec>,
+        val manualNativeOk: Boolean,
+    )
 
     /** Phase 6 / P3-C: current native sample rate for the diagnostics card. */
     fun engineSampleRate(): Int = engine.sampleRate
@@ -775,12 +797,16 @@ class AutoEqViewModel(
         viewModelScope.launch {
             // 표시용 선택은 라우트 적격성과 무관하게 항상 기억(탭별 독립). 엔진 적용은 deviceManager가 담당.
             val resolved = api.resolve(entry)?.validated()
-            deviceManager.selectProfileForCurrentDevice(entry)
+            val applied = deviceManager.selectProfileForCurrentDevice(entry)
             _selectedAutoEqProfile.value = resolved
             // Record into the quick-pick spinner so the user can re-select later.
             settings.addRecentProfile(entry)
             // Selecting an AutoEQ profile makes AUTOEQ the active correction provider (현재 사용중).
-            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+            if (applied) {
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+            } else {
+                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+            }
         }
     }
 
@@ -804,7 +830,10 @@ class AutoEqViewModel(
         opraSyncMutex.withLock {
             _opraRefreshing.value = true
             try {
-                val result = withContext(Dispatchers.IO) { opraRepository.refresh(force) }
+                val catalogEmpty = withContext(Dispatchers.IO) {
+                    opraRepository.observeCatalog().first().isEmpty()
+                }
+                val result = withContext(Dispatchers.IO) { opraRepository.refresh(force || catalogEmpty) }
                 _opraSyncState.value = opraRepository.syncState()
                 if (notify) {
                     _importMessage.value = when (result) {
@@ -854,11 +883,18 @@ class AutoEqViewModel(
                 _importMessage.value = application.getString(R.string.opra_profile_unsupported)
                 return@launch
             }
-            deviceManager.applyResolvedProfile(auto)
-            _selectedOpraProfile.value = auto.validated()
-            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
-            settings.setActiveOpraProfileId(opra.id)
-            settings.addRecentOpraProfile(opra.id, opra.profileName)
+            if (deviceManager.applyResolvedProfile(auto)) {
+                _selectedOpraProfile.value = auto.validated()
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
+                settings.setActiveOpraProfileId(opra.id)
+                settings.addRecentOpraProfile(opra.id, opra.profileName)
+            } else {
+                _selectedOpraProfile.value = auto.validated()
+                settings.setActiveOpraProfileId(opra.id)
+                settings.addRecentOpraProfile(opra.id, opra.profileName)
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+            }
         }
     }
 
@@ -870,11 +906,18 @@ class AutoEqViewModel(
                 _importMessage.value = application.getString(R.string.opra_profile_unsupported)
                 return@launch
             }
-            deviceManager.applyResolvedProfile(auto)
-            _selectedOpraProfile.value = auto.validated()
-            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
-            settings.setActiveOpraProfileId(recent.id)
-            settings.addRecentOpraProfile(recent.id, recent.name)
+            if (deviceManager.applyResolvedProfile(auto)) {
+                _selectedOpraProfile.value = auto.validated()
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
+                settings.setActiveOpraProfileId(recent.id)
+                settings.addRecentOpraProfile(recent.id, recent.name)
+            } else {
+                _selectedOpraProfile.value = auto.validated()
+                settings.setActiveOpraProfileId(recent.id)
+                settings.addRecentOpraProfile(recent.id, recent.name)
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+            }
         }
     }
 
@@ -905,8 +948,11 @@ class AutoEqViewModel(
     fun useAutoEqSelection() {
         val p = _selectedAutoEqProfile.value ?: return
         viewModelScope.launch {
-            deviceManager.applyResolvedProfile(p)
-            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+            if (deviceManager.applyResolvedProfile(p)) {
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+            } else {
+                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+            }
         }
     }
 
@@ -914,8 +960,12 @@ class AutoEqViewModel(
     fun useOpraSelection() {
         val p = _selectedOpraProfile.value ?: return
         viewModelScope.launch {
-            deviceManager.applyResolvedProfile(p)
-            settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
+            if (deviceManager.applyResolvedProfile(p)) {
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
+            } else {
+                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
+                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+            }
         }
     }
 

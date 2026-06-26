@@ -1,0 +1,18 @@
+<!-- AuralTune launcher background: subtle diagonal deep-indigo gradient (brand family). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M0,0 L108,0 L108,108 L0,108 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="linear"
+                android:startX="0" android:startY="0"
+                android:endX="108" android:endY="108"
+                android:startColor="#2E3E8C"
+                android:endColor="#141C44" />
+        </aapt:attr>
+    </path>
+</vector>

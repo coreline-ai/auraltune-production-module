@@ -83,6 +83,44 @@ class OpraRoomStoreTest {
     }
 
     @Test
+    fun search_treatsSqlLikeWildcardsAsLiteralText() = runBlocking {
+        val productPercent =
+            """{"type":"product","id":"pud::percent","data":{"name":"Vogue 100%","type":"headphones","subtype":"over_the_ear","vendor_id":"pud"}}"""
+        val productPercentLookalike =
+            """{"type":"product","id":"pud::percentx","data":{"name":"Vogue 100X","type":"headphones","subtype":"over_the_ear","vendor_id":"pud"}}"""
+        val productUnderscore =
+            """{"type":"product","id":"pud::under","data":{"name":"AB_C","type":"headphones","subtype":"over_the_ear","vendor_id":"pud"}}"""
+        val productUnderscoreLookalike =
+            """{"type":"product","id":"pud::underx","data":{"name":"ABXC","type":"headphones","subtype":"over_the_ear","vendor_id":"pud"}}"""
+        val eqPercent =
+            """{"type":"eq","id":"pud:percent::ora","data":{"author":"oratory1990","type":"parametric_eq","parameters":{"gain_db":0,"bands":[{"type":"peak_dip","frequency":200,"gain_db":1,"q":1}]},"product_id":"pud::percent"}}"""
+        val eqPercentLookalike =
+            """{"type":"eq","id":"pud:percentx::ora","data":{"author":"oratory1990","type":"parametric_eq","parameters":{"gain_db":0,"bands":[{"type":"peak_dip","frequency":200,"gain_db":1,"q":1}]},"product_id":"pud::percentx"}}"""
+        val eqUnderscore =
+            """{"type":"eq","id":"pud:under::ora","data":{"author":"oratory1990","type":"parametric_eq","parameters":{"gain_db":0,"bands":[{"type":"peak_dip","frequency":200,"gain_db":1,"q":1}]},"product_id":"pud::under"}}"""
+        val eqUnderscoreLookalike =
+            """{"type":"eq","id":"pud:underx::ora","data":{"author":"oratory1990","type":"parametric_eq","parameters":{"gain_db":0,"bands":[{"type":"peak_dip","frequency":200,"gain_db":1,"q":1}]},"product_id":"pud::underx"}}"""
+
+        val result = OpraJsonlParser().parse(
+            sequenceOf(
+                vendor,
+                productPercent,
+                productPercentLookalike,
+                productUnderscore,
+                productUnderscoreLookalike,
+                eqPercent,
+                eqPercentLookalike,
+                eqUnderscore,
+                eqUnderscoreLookalike,
+            ),
+        )
+        store.upsert(result, nowMs = 1_000L)
+
+        assertEquals(listOf("pud:percent::ora"), store.search("100%").map { it.id })
+        assertEquals(listOf("pud:under::ora"), store.search("AB_C").map { it.id })
+    }
+
+    @Test
     fun syncState_roundTrips() = runBlocking {
         assertNull(store.syncState())
         store.setSyncState(OpraSyncState(opraCommit = "c1", snapshotVersion = "v1", lastSyncedAt = 5L))

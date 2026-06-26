@@ -40,7 +40,10 @@ class OpraRepositoryImpl(
         val current = store.syncState()
         val newCommit = snapshot.syncState.opraCommit
         // force=true는 commit이 같아도 재파싱한다(파서/매핑 수정을 기존 캐시에 전파).
-        if (!force && newCommit != null && newCommit == current?.opraCommit) {
+        // catalog가 비어 있으면 syncState만 남은 손상 상태일 수 있으므로 NoChange로
+        // 빠지지 않고 재파싱해 캐시를 복구한다.
+        val hasCatalogRows = store.catalogCount() > 0
+        if (!force && hasCatalogRows && newCommit != null && newCommit == current?.opraCommit) {
             return OpraSyncResult.NoChange
         }
 

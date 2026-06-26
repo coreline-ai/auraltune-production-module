@@ -16,13 +16,13 @@ class OpraRoomStore(private val db: OpraDatabase) : OpraStore {
 
     private val dao = db.opraDao()
 
-    suspend fun count(): Int = dao.catalogCount()
+    override suspend fun catalogCount(): Int = dao.catalogCount()
 
     override fun observeCatalog(): Flow<List<OpraCatalogEntry>> =
         dao.observeCatalog().map { rows -> rows.map { it.toDomain() } }
 
     override suspend fun search(query: String, limit: Int): List<OpraCatalogEntry> {
-        val q = query.trim().lowercase()
+        val q = query.trim().lowercase().escapeLike()
         if (q.isEmpty()) return emptyList()
         return dao.search(q, limit).map { it.toDomain() }
     }
@@ -55,5 +55,16 @@ class OpraRoomStore(private val db: OpraDatabase) : OpraStore {
 
     companion object {
         private const val KEY = "catalog"
+    }
+}
+
+private fun String.escapeLike(): String = buildString(length) {
+    for (ch in this@escapeLike) {
+        when (ch) {
+            '\\' -> append("\\\\")
+            '%' -> append("\\%")
+            '_' -> append("\\_")
+            else -> append(ch)
+        }
     }
 }

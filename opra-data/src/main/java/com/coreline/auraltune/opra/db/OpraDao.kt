@@ -17,7 +17,7 @@ interface OpraDao {
     fun observeCatalog(): Flow<List<OpraCatalogEntryEntity>>
 
     @Query(
-        "SELECT * FROM opra_catalog_entries WHERE searchText LIKE '%' || :q || '%' " +
+        "SELECT * FROM opra_catalog_entries WHERE searchText LIKE '%' || :q || '%' ESCAPE '\\' " +
             "ORDER BY displayName COLLATE NOCASE ASC LIMIT :limit",
     )
     suspend fun search(q: String, limit: Int): List<OpraCatalogEntryEntity>

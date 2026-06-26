@@ -6,7 +6,6 @@ package com.coreline.auraltune.audio
 
 import android.media.AudioDeviceInfo
 import android.os.Build
-import com.coreline.auraltune.BuildConfig
 import java.security.MessageDigest
 
 /**
@@ -17,7 +16,8 @@ import java.security.MessageDigest
  *   2. BT (A2DP / BLE / SCO) with stable address → `bt|<productName>|<address>`
  *   3. BT without address (random RPA, permission denied) → `bt|<productName>`
  *   4. Wired headphones/headset → `wired|<productName>` (productName usually "headphones")
- *   5. Anything else (speaker, HDMI, line-digital) → returns null (AutoEQ N/A)
+ *   5. Known non-headphone routes (speaker, HDMI, line) → supportsAutoEq=false.
+ *      Unknown routes still return null.
  *
  * The raw fields are NEVER logged or transmitted — see [stableHash] for a
  * redacted form suitable for analytics / Crashlytics.
@@ -40,9 +40,10 @@ data class DeviceKey(
 
     companion object {
         /**
-         * Build a [DeviceKey] from an [AudioDeviceInfo]. Returns null when the
-         * device is not a headphone-class output (speaker, HDMI, etc.) — AutoEQ
-         * should not be applied for those.
+         * Build a [DeviceKey] from an [AudioDeviceInfo]. Headphone-class outputs
+         * return supportsAutoEq=true. Known non-headphone outputs return
+         * supportsAutoEq=false so route reconciliation can actively clear stale
+         * headphone correction.
          *
          * @param btAddressAvailable Whether the caller has BLUETOOTH_CONNECT
          *        permission. When false, BT keys fall back to product-name-only.
@@ -99,19 +100,14 @@ data class DeviceKey(
                 AudioDeviceInfo.TYPE_LINE_DIGITAL,
                 AudioDeviceInfo.TYPE_LINE_ANALOG,
                 AudioDeviceInfo.TYPE_TELEPHONY -> {
-                    // AutoEQ is N/A for speakers/HDMI/telephony — headphone correction
-                    // must not apply on these routes. Release returns null. Debug keeps an
-                    // eligible key so EQ can be A/B-tested over the built-in speaker without
-                    // a headphone attached (dev-plan 110525 Phase 1 release gate).
-                    if (BuildConfig.DEBUG) {
-                        DeviceKey(
-                            raw = "speaker|$productName|${info.type}",
-                            supportsAutoEq = true,
-                            displayName = productName,
-                        )
-                    } else {
-                        null
-                    }
+                    // AutoEQ is N/A for speakers/HDMI/telephony. Return an explicit
+                    // ineligible key so DeviceAutoEqManager clears the previous
+                    // headphone correction instead of leaving it active.
+                    DeviceKey(
+                        raw = "non_headphone|$productName|${info.type}",
+                        supportsAutoEq = false,
+                        displayName = productName,
+                    )
                 }
                 else -> null
             }

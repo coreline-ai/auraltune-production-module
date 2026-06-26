@@ -42,6 +42,7 @@ interface OpraParser {
 /** Local persistence/query for OPRA data (Room-backed in Phase 3). */
 interface OpraStore {
     fun observeCatalog(): Flow<List<OpraCatalogEntry>>
+    suspend fun catalogCount(): Int
     suspend fun search(query: String, limit: Int = 50): List<OpraCatalogEntry>
     suspend fun resolve(profileId: String): OpraEqProfile?
     suspend fun upsert(result: OpraParseResult, nowMs: Long)

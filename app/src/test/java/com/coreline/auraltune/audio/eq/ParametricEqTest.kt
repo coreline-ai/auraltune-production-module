@@ -110,6 +110,86 @@ class ParametricEqTest {
     }
 
     @Test
+    fun parametricTypeChangePreservesGainQAndFrequency() {
+        val original = ParametricBand(
+            id = "band",
+            type = EqFilterType.PEAKING.nativeId,
+            freqHz = 320f,
+            gainDb = 5.5f,
+            q = 1.35f,
+        )
+
+        val highPass = updateParametricBandModel(
+            band = original,
+            type = EqFilterType.HIGH_PASS.nativeId,
+            gainLimitDb = 6f,
+        )
+
+        assertEquals(EqFilterType.HIGH_PASS.nativeId, highPass.type)
+        assertEquals(320f, highPass.freqHz, 0.0001f)
+        assertEquals(5.5f, highPass.gainDb, 0.0001f)
+        assertEquals(1.35f, highPass.q, 0.0001f)
+
+        val lowShelf = updateParametricBandModel(
+            band = highPass,
+            type = EqFilterType.LOW_SHELF.nativeId,
+            gainLimitDb = 6f,
+        )
+
+        assertEquals(EqFilterType.LOW_SHELF.nativeId, lowShelf.type)
+        assertEquals(5.5f, lowShelf.gainDb, 0.0001f)
+        assertEquals(1.35f, lowShelf.q, 0.0001f)
+    }
+
+    @Test
+    fun parametricTypeChangeReclampsHiddenHighPassGain() {
+        val highPass = ParametricBand(
+            id = "band",
+            type = EqFilterType.HIGH_PASS.nativeId,
+            freqHz = 120f,
+            gainDb = 6f,
+            q = 0.707f,
+        )
+
+        val lowShelf = updateParametricBandModel(
+            band = highPass,
+            type = EqFilterType.LOW_SHELF.nativeId,
+            gainLimitDb = 3f,
+        )
+
+        assertEquals(EqFilterType.LOW_SHELF.nativeId, lowShelf.type)
+        assertEquals(3f, lowShelf.gainDb, 0.0001f)
+        assertEquals(0.707f, lowShelf.q, 0.0001f)
+    }
+
+    @Test
+    fun parametricExplicitGainEditClampsToLiveLimit() {
+        val band = ParametricBand(
+            id = "band",
+            type = EqFilterType.HIGH_SHELF.nativeId,
+            freqHz = 8_000f,
+            gainDb = 2f,
+            q = 0.8f,
+        )
+
+        val boosted = updateParametricBandModel(
+            band = band,
+            gainDb = 99f,
+            gainLimitDb = 6f,
+        )
+        val cut = updateParametricBandModel(
+            band = band,
+            gainDb = -99f,
+            gainLimitDb = 6f,
+        )
+
+        assertEquals(6f, boosted.gainDb, 0.0001f)
+        assertEquals(-6f, cut.gainDb, 0.0001f)
+        assertEquals(0.8f, boosted.q, 0.0001f)
+        assertEquals(EqFilterType.HIGH_SHELF.nativeId, boosted.type)
+    }
+
+    @Test
     fun nextFreqSpreadsBandsApart() {
         // Empty → default 1 kHz.
         assertEquals(ParametricBand.DEFAULT_FREQ_HZ, ParametricBand.nextFreqHz(emptyList()))

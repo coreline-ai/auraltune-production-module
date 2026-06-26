@@ -1,5 +1,16 @@
 # AuralTune — 디자인 핸드오프 사양서
 
+## 2026-06-26 구현 현행화 메모
+
+| 항목 | 현재 구현 기준 |
+| --- | --- |
+| 런처 아이콘 | Adaptive icon XML은 `@drawable/ic_launcher_background`, `foreground`, `monochrome`를 참조하고, density PNG fallback은 mdpi 48 / hdpi 72 / xhdpi 96 / xxhdpi 144 / xxxhdpi 192 규격으로 확인했다. |
+| 플레이어 오류 UX | 재생 실패 시 실패한 트랙을 큐에서 제거하고 snackbar로 파일명과 Media3 error code를 표시한다. |
+| 플레이어 포맷 표시 | 그래프 상단 포맷 표시는 AudioProcessor configure 이벤트에서 bit depth/sample rate를 갱신한다. PCM 16/24/32-bit integer 및 float 입력을 처리한다. |
+| AutoEQ/OPRA 적용 상태 | 카드 선택값과 현재 적용 provider를 분리한다. 부적격 출력 장치에서는 OPRA/AutoEQ가 현재 사용 중으로 표시되지 않으며 엔진 보정은 clear된다. |
+| 접근성 | 하단 내비, 플레이어 transport, 검색 clear, 프로파일 picker, 그래픽/파라메트릭 EQ 주요 버튼에 contentDescription을 둔다. 파라메트릭 밴드 추가 아이콘도 설명을 가진다. |
+| i18n | 주요 플레이어/검색/상태/진단/캐시 문자열은 한국어 리소스로 정리했다. OPRA 라이선스 문구는 법적 고지 성격상 일부 영문 고유명과 라이선스 명칭을 유지한다. |
+
 > **이 문서 하나로 UI 전체를 재현할 수 있도록** 작성된 디자인 사양서입니다.
 > 1부는 **현재 구현 사양**(코드 전수 감사 기반, redline 포함), 2부는 **개선 제안 / 열린 질문**입니다.
 > 모든 사양은 소스 코드(`663b2f9`, main)에서 직접 추출·검증했습니다.

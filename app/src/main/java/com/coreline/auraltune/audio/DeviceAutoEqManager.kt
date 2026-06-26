@@ -202,13 +202,22 @@ class DeviceAutoEqManager(
     }
 
     /**
-     * Provider-agnostic engine apply. Used by the OPRA comparison path (the OPRA profile is
-     * converted to [AutoEqProfile] by the adapter in :app, then applied through the SAME engine
-     * path AutoEq uses). [validated] is applied defensively. This intentionally bypasses the
-     * per-device AutoEq selection bookkeeping — the caller (ViewModel) owns active-provider state.
+     * Provider-agnostic guarded engine apply. Used by OPRA and "use current selection" paths.
+     * The current route must be headphone-eligible; otherwise stale correction is cleared and
+     * the caller keeps provider state unchanged.
      */
-    fun applyResolvedProfile(profile: AutoEqProfile) {
-        pushToEngine(profile.validated())
+    fun applyResolvedProfile(profile: AutoEqProfile): Boolean {
+        if (lastKey?.supportsAutoEq != true) {
+            engine.clearAutoEq()
+            return false
+        }
+        val validated = profile.validated()
+        if (validated.filters.isEmpty()) {
+            engine.clearAutoEq()
+            return false
+        }
+        pushToEngine(validated)
+        return true
     }
 
     /**
@@ -270,7 +279,13 @@ class DeviceAutoEqManager(
         }
         val btAvail = hasBluetoothConnect()
         val key = DeviceKey.fromAudioDevice(chosen, btAddressAvailable = btAvail)
-            ?: return
+            ?: run {
+                lastKey = null
+                currentDeviceHash = null
+                resolveJob?.cancel()
+                engine.clearAutoEq()
+                return
+            }
 
         // (a) Sample-rate update — DELIBERATELY DISABLED for MVP (P0-2).
         //

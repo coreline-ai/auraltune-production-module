@@ -1,0 +1,13 @@
+<!-- AuralTune launcher foreground: 5 equalizer bars (round-capped), centered in the
+     adaptive-icon safe zone (central 66dp of the 108dp viewport). Brand periwinkle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M30,42 L30,66" android:strokeColor="#B5C4FF" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M42,30 L42,78" android:strokeColor="#B5C4FF" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M54,36 L54,72" android:strokeColor="#B5C4FF" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M66,28 L66,80" android:strokeColor="#B5C4FF" android:strokeWidth="8" android:strokeLineCap="round" />
+    <path android:pathData="M78,44 L78,64" android:strokeColor="#B5C4FF" android:strokeWidth="8" android:strokeLineCap="round" />
+</vector>

@@ -13,7 +13,7 @@
 [![NDK](https://img.shields.io/badge/NDK-r27.0.12077973-blue?style=flat-square)](#-build-matrix)
 [![16KB pages](https://img.shields.io/badge/16KB%20pages-✓-orange?style=flat-square)](#-correctness-invariants)
 
-[![Tests](https://img.shields.io/badge/Kotlin%20unit-217%20PASS-brightgreen?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/Kotlin%20unit-236%20PASS-brightgreen?style=flat-square)](#-testing)
 [![Native tests](https://img.shields.io/badge/native%20suites-8%20PASS-brightgreen?style=flat-square)](#-testing)
 [![DSP parity](https://img.shields.io/badge/scipy.lfilter%20SNR-140--157%20dB-success?style=flat-square)](#-correctness-invariants)
 [![TSan](https://img.shields.io/badge/ThreadSanitizer-clean-success?style=flat-square)](#-correctness-invariants)
@@ -148,8 +148,33 @@ adb shell am start -n com.coreline.auraltune/.MainActivity
 
 ```bash
 ./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :opra-data:testDebugUnitTest :app:testDebugUnitTest
-# Expected: 217 tests, all PASS (71 engine / 96 autoeq-data / 27 opra-data / 23 app)
+# Expected: 236 tests, all PASS across :audio-engine, :autoeq-data, :opra-data, and :app
 ```
+
+### 2026-06-26 Release Readiness Notes
+
+Current `main` includes the Phase 7 hardening pass:
+
+- Player errors are surfaced to the user and failed tracks are removed from the queue instead of silently looping.
+- The player audio processor accepts PCM 16-bit, 24-bit, 32-bit integer, and float decode outputs, then emits 16-bit PCM for Media3 sink compatibility.
+- AutoEQ/OPRA profile application is route-gated: speaker, HDMI, line, and telephony routes actively clear stale headphone correction.
+- OPRA restore/apply failure keeps the saved selection but does not show OPRA as currently applied when the output route is ineligible.
+- OPRA search escapes SQL LIKE wildcards (`%`, `_`, `\`) so user queries are literal.
+- Adaptive launcher icon resources are tracked under `drawable/` with density PNG fallbacks.
+
+Verified locally on 2026-06-26:
+
+```bash
+./gradlew.bat --no-daemon --no-build-cache "-Dkotlin.compiler.execution.strategy=in-process" \
+  :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :opra-data:testDebugUnitTest :app:testDebugUnitTest
+
+./gradlew.bat --no-daemon --no-build-cache --max-workers=2 \
+  "-Dorg.gradle.parallel=false" \
+  "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8 -XX:+HeapDumpOnOutOfMemoryError" \
+  "-Dkotlin.compiler.execution.strategy=in-process" :app:assembleRelease
+```
+
+Validation snapshot: `236` unit tests PASS, release build PASS, APK debug-marker scan PASS, native LOAD alignment `0x4000` PASS.
 
 ### Run native unit tests (host JVM)
 

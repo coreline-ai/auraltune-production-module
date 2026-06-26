@@ -75,6 +75,19 @@ class OpraRepositoryImplTest {
     }
 
     @Test
+    fun refresh_sameCommitWithEmptyCatalog_reimports() = runBlocking {
+        store.setSyncState(OpraSyncState(opraCommit = "c1"))
+        assertEquals(0, store.observeCatalog().first().size)
+
+        val src = FakeSource(snapshot("c1", listOf(vendor, product, eq("pud:vogue::a", "pud::vogue"))))
+        val repo = OpraRepositoryImpl(store, src)
+
+        assertTrue(repo.refresh() is OpraSyncResult.Updated)
+        assertEquals(1, store.observeCatalog().first().size)
+        assertEquals("c1", store.syncState()!!.opraCommit)
+    }
+
+    @Test
     fun refresh_forceTrue_reimportsEvenWhenCommitIsUnchanged() = runBlocking {
         val src = FakeSource(snapshot("c1", listOf(vendor, product, eq("pud:vogue::a", "pud::vogue"))))
         val repo = OpraRepositoryImpl(store, src)
