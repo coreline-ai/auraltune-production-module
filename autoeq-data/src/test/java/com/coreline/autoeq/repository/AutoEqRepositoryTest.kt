@@ -9,6 +9,8 @@ import com.coreline.autoeq.db.AutoEqDatabase
 import com.coreline.autoeq.db.CatalogStore
 import com.coreline.autoeq.db.ProfileStore
 import com.coreline.autoeq.model.AutoEqCatalogEntry
+import com.coreline.autoeq.model.ParseResult
+import com.coreline.autoeq.parser.ParametricEqParser
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
@@ -248,6 +250,86 @@ class AutoEqRepositoryTest {
         // No DB row was written → a second call must hit the network again (not a phantom DB hit).
         assertNull(repo.fetchProfile(entry))
         assertEquals("No partial DB row — both attempts go to network", 2, callCount.get())
+    }
+
+    @Test
+    fun `malformed fixture profile resolves null and stores no DB row`() = runBlocking {
+        val callCount = AtomicInteger(0)
+        val repo = newRepository(
+            clientReturning(testResource("fixtures/autoeq/malformed-parametric-eq.txt")) {
+                callCount.incrementAndGet()
+            },
+        )
+        val entry = entryOf("Bad Fixture", "x/y/BadFixture")
+
+        assertNull("Malformed fixture profile must not resolve", repo.fetchProfile(entry))
+        assertNull(
+            "Malformed fixture must not leave a partial DB row",
+            ProfileStore(db.profileDao()).read(entry.id, nowMs = 12_345L),
+        )
+        assertEquals("Fixture should be injected through exactly one HTTP response", 1, callCount.get())
+    }
+
+    @Test
+    fun `stored filters match parser output exactly`() = runBlocking {
+        val repo = newRepository(clientReturning(SAMPLE_PROFILE_TEXT))
+        val entry = entryOf("Stored Match", "x/y/StoredMatch")
+
+        val fetched = repo.fetchProfile(entry)
+        val stored = ProfileStore(db.profileDao()).read(entry.id, nowMs = 12_345L)
+        val parsed = ParametricEqParser.parse(
+            text = SAMPLE_PROFILE_TEXT,
+            name = entry.name,
+            id = entry.id,
+            measuredBy = entry.measuredBy,
+        ) as ParseResult.Success
+
+        assertNotNull("network fetch should resolve", fetched)
+        assertNotNull("profile should be stored in DB", stored)
+        assertEquals(parsed.profile.preampDB, stored!!.preampDB)
+        assertEquals(parsed.profile.optimizedSampleRate, stored.optimizedSampleRate, 0.0)
+        assertEquals(parsed.profile.filters, stored.filters)
+    }
+
+    @Test
+    fun `refreshCatalog 304 marks not modified without rewriting catalog`() = runBlocking {
+        val seenIfNoneMatch = AtomicReference<String?>()
+        val store = CatalogStore(db.catalogDao(), RuntimeEnvironment.getApplication().assets)
+        store.applyRemote(listOf(entryOf("Existing", "x/y/Existing")), 10L, etag = "\"etag-1\"", contentSha256 = "sha-1")
+        val repo = newRepository(
+            clientResponding(code = 304, body = "") { req ->
+                seenIfNoneMatch.set(req.header("If-None-Match"))
+            },
+        )
+
+        val result = repo.refreshCatalog()
+
+        assertTrue("304 should be a successful no-op", result.isSuccess)
+        assertNull("304 returns null to mean not modified", result.getOrThrow())
+        assertEquals("\"etag-1\"", seenIfNoneMatch.get())
+        assertEquals(1, store.count())
+        val state = store.syncState()!!
+        assertEquals("\"etag-1\"", state.etag)
+        assertEquals("sha-1", state.contentSha256)
+        assertEquals("not_modified", state.status)
+        assertTrue("not_modified should advance lastSyncAtMs", state.lastSyncAtMs >= 10L)
+    }
+
+    @Test
+    fun `refreshCatalog malformed index preserves existing DB`() = runBlocking {
+        val store = CatalogStore(db.catalogDao(), RuntimeEnvironment.getApplication().assets)
+        val existing = entryOf("Existing", "x/y/Existing")
+        store.applyRemote(listOf(existing), 10L, etag = "\"etag-1\"", contentSha256 = "sha-1")
+        val repo = newRepository(clientResponding(code = 200, body = "not an INDEX.md list"))
+
+        val result = repo.refreshCatalog()
+
+        assertTrue("malformed index should fail", result.isFailure)
+        assertEquals(listOf(existing.id), store.loadFromDb().map { it.id })
+        val state = store.syncState()!!
+        assertEquals("\"etag-1\"", state.etag)
+        assertEquals("sha-1", state.contentSha256)
+        assertEquals("network", state.status)
     }
 
     @Test
@@ -532,6 +614,31 @@ class AutoEqRepositoryTest {
             .addInterceptor(interceptor)
             .build()
     }
+
+    private fun clientResponding(
+        code: Int,
+        body: String,
+        onIntercept: (okhttp3.Request) -> Unit = {},
+    ): OkHttpClient {
+        val interceptor = Interceptor { chain ->
+            val req = chain.request()
+            onIntercept(req)
+            Response.Builder()
+                .request(req)
+                .protocol(Protocol.HTTP_1_1)
+                .code(code)
+                .message(if (code == 304) "Not Modified" else "OK")
+                .body(body.toResponseBody())
+                .build()
+        }
+        return OkHttpClient.Builder()
+            .addInterceptor(interceptor)
+            .build()
+    }
+
+    private fun testResource(path: String): String =
+        requireNotNull(javaClass.classLoader?.getResource(path)) { "missing test resource: $path" }
+            .readText(Charsets.UTF_8)
 
     @Suppress("UNCHECKED_CAST")
     private fun inflightMap(repo: AutoEqRepository): Map<String, *> {

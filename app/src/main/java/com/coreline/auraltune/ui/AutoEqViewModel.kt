@@ -1061,6 +1061,18 @@ class AutoEqViewModel(
                         result.changedProfiles,
                         result.removedProfiles,
                     )
+                is DeltaResult.FullResynced ->
+                    _importMessage.value = application.getString(
+                        R.string.profile_update_full_resync_completed_format,
+                        result.changedFileCount,
+                        result.catalogEntries,
+                        result.invalidatedProfiles,
+                    )
+                is DeltaResult.FullResyncRequired ->
+                    _importMessage.value = application.getString(
+                        R.string.profile_update_full_resync_required_format,
+                        result.changedFileCount,
+                    )
                 is DeltaResult.Failed ->
                     if (manual) _importMessage.value =
                         application.getString(R.string.profile_update_failed_format, result.reason)

@@ -117,8 +117,9 @@ class AutoEqRepository(
      *    downgrade to `Error` while serviceable cache is in memory).
      */
     fun loadCatalog(scope: CoroutineScope): Flow<CatalogState> = callbackFlow {
-        // Phase 4 DB-first: seed offline from the bundled INDEX.md on first run, migrate any
-        // legacy catalog.json, then serve the DB immediately (works with no network).
+        // DB-first: current releases open the prebuilt Room seed (catalog + parsed profiles)
+        // before this point. seedIfNeeded() is a legacy INDEX.md fallback/no-op when absent;
+        // catalog.json migration is still kept for older installs.
         val dbEntries = withContext(Dispatchers.IO) {
             runCatching {
                 val now = System.currentTimeMillis()
@@ -535,10 +536,14 @@ class AutoEqRepository(
         }.getOrNull() ?: return@withContext DeltaResult.Failed("compare fetch failed")
 
         // GitHub's compare API caps files[] at 300. A delta that large (e.g. a long-offline
-        // install) would silently drop the overflow — so DON'T advance the commit; signal the
-        // caller to do a full resync instead of half-applying and losing the rest.
+        // install) would silently drop the overflow, so never half-apply it. First try a full
+        // catalog resync; only advance the commit after the fallback succeeds.
         if (compare.files.size >= GITHUB_COMPARE_FILE_CAP) {
-            return@withContext DeltaResult.Failed("delta too large (>= $GITHUB_COMPARE_FILE_CAP files) — full resync required")
+            return@withContext syncFullCatalogFromHead(
+                head = head,
+                nowMs = now,
+                changedFileCount = compare.files.size,
+            )
         }
 
         // Reconcile catalog membership from a fresh INDEX (adds new + tombstones removed).
@@ -574,6 +579,50 @@ class AutoEqRepository(
         }
         catalogStore.setAutoEqCommit(head, now)
         DeltaResult.Updated(changedProfiles = changed, removedProfiles = removed, toCommit = head)
+    }
+
+    private suspend fun syncFullCatalogFromHead(
+        head: String,
+        nowMs: Long,
+        changedFileCount: Int,
+    ): DeltaResult {
+        val indexBody = runCatching { httpGet(INDEX_URL, null) }.getOrNull()
+            ?: return DeltaResult.FullResyncRequired(
+                changedFileCount = changedFileCount,
+                cap = GITHUB_COMPARE_FILE_CAP,
+            )
+        val entries = IndexMdParser.parse(indexBody)
+        if (entries.isEmpty()) {
+            telemetry.event("parse_failed", mapOf("kind" to "catalog_full_resync"))
+            return DeltaResult.FullResyncRequired(
+                changedFileCount = changedFileCount,
+                cap = GITHUB_COMPARE_FILE_CAP,
+            )
+        }
+
+        return try {
+            val tombstoned = catalogStore.applyRemote(
+                entries = entries,
+                nowMs = nowMs,
+                etag = null,
+                contentSha256 = CatalogStore.sha256(indexBody),
+            )
+            val invalidated = profileStore.deleteNonImportedProfiles()
+            catalogStore.setAutoEqCommit(head, nowMs)
+            DeltaResult.FullResynced(
+                changedFileCount = changedFileCount,
+                catalogEntries = entries.size,
+                invalidatedProfiles = invalidated,
+                removedCatalogEntries = tombstoned,
+                toCommit = head,
+            )
+        } catch (t: Throwable) {
+            telemetry.event(
+                "fetch_failed",
+                mapOf("kind" to "catalog_full_resync", "error" to (t::class.simpleName ?: "Throwable")),
+            )
+            DeltaResult.Failed(t.message ?: "full resync failed")
+        }
     }
 
     /** Simple GET → body string (or null). [accept] sets the Accept header (GitHub API). */
@@ -656,6 +705,16 @@ sealed interface DeltaResult {
     data object NoChange : DeltaResult
     /** Applied a delta: [changedProfiles] upserted, [removedProfiles] deleted; DB now at [toCommit]. */
     data class Updated(val changedProfiles: Int, val removedProfiles: Int, val toCommit: String) : DeltaResult
+    /** Compare was capped, so the full catalog was refreshed and stale built-in/fetched profiles were invalidated. */
+    data class FullResynced(
+        val changedFileCount: Int,
+        val catalogEntries: Int,
+        val invalidatedProfiles: Int,
+        val removedCatalogEntries: Int,
+        val toCommit: String,
+    ) : DeltaResult
+    /** GitHub compare was capped/truncated; commit is left at the old base and no partial delta is applied. */
+    data class FullResyncRequired(val changedFileCount: Int, val cap: Int) : DeltaResult
     data class Failed(val reason: String) : DeltaResult
 }
 

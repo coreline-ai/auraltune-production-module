@@ -18,6 +18,30 @@ The catalog is **DB-first**: a snapshot of the AutoEQ index ships inside the app
 
 > **Tip:** If your exact model isn't listed, try searching for the product line — similar models often share frequency response characteristics.
 
+## Local Database Model
+
+The current release uses a prebuilt Room asset at `databases/autoeq_seed.db` inside the module assets. Fresh installs open this database with `createFromAsset`, so both the catalog and parsed profile filters are available before any network request. Older installs still keep the legacy seed/cache migration paths.
+
+| Table | Purpose | Important Fields |
+|---|---|---|
+| `catalog_entries` | Search index for AutoEQ profiles | `id`, `name`, `normalizedName`, `measuredBy`, `relativePath`, `lastSeenAtMs`, `isDeleted` |
+| `profiles` | Parsed profile header needed by the engine | `id`, `catalogId`, `name`, `source`, `preampDb`, `optimizedSampleRate`, `sourceUrl`, `sourceSha256`, `lastAccessMs` |
+| `profile_filters` | Ordered biquad sections for each profile | `profileId`, `position`, `type`, `frequencyHz`, `gainDb`, `q` |
+| `sync_state` | Catalog refresh state | `etag`, `contentSha256`, `seedVersion`, `lastSyncAtMs`, `status` |
+
+Raw `ParametricEQ.txt` bodies are not persisted in Room. A stored profile is reassembled from `profiles` + ordered `profile_filters`, which is enough to drive the native AutoEQ chain.
+
+## Refresh and Fallback Flow
+
+1. On startup, `AutoEqRepository.loadCatalog()` serves the prebuilt Room database first.
+2. If the catalog is empty or stale, `refreshCatalog()` performs a conditional GitHub `INDEX.md` request using the stored ETag.
+3. HTTP `304 Not Modified` updates sync metadata only and does not rewrite catalog rows.
+4. A fresh `INDEX.md` parse upserts current rows and tombstones entries not seen in the full sync.
+5. `fetchProfile()` checks the Room profile table first, then performs a coalesced network fetch only on DB miss.
+6. Incremental update uses GitHub commits/compare. If the compare response reaches the 300-file cap, AuralTune refuses to half-apply it and attempts a full catalog resync instead.
+7. If the full resync succeeds, stale built-in/fetched profiles are invalidated for on-demand refetch; imported profiles are preserved.
+8. If the full resync fails or the fallback `INDEX.md` is malformed, the previous commit and existing profiles remain intact and the UI shows a retry-required state.
+
 ## Import Custom Profiles
 
 If you have a custom measurement or want to use a profile from another source:

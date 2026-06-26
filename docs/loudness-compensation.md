@@ -1,165 +1,112 @@
 # Loudness Compensation
 
-> 사람 귀의 주파수 민감도가 음량에 따라 비선형적으로 바뀌는 현상을 보정하는 기능.
+> 사람 귀의 주파수 민감도가 음량에 따라 비선형적으로 바뀌는 현상을 보정하는 DSP 기능.
 
-> **⚠️ 구현 상태(2026-06-22 갱신):** 이 문서는 원래 "제외된 기능"으로 작성됐으나, **DSP 코어는 현재 구현되어 있다.** `audio-engine/src/main/cpp/core/loudness/`에 ISO 226 contour, K-weighting(ITU-R BS.1770), `LoudnessCompensator`, `GainComputer`, `GainSmoother`, `LoudnessEqualizer` 등이 존재하며 엔진 신호 체인(`Manual → AutoEQ preamp → AutoEQ → Loudness Comp → Loudness Eq → Soft Limiter → NaN guard`)에 포함된다. 아래 §2/§5/§6은 설계·근거·검증 기준 문서로 읽되, "추가할 경우"는 "구현된 방식"으로 이해할 것. (사용자 노출 UI/토글 범위는 별도 확인 필요.)
+## 구현 상태
+
+| 영역 | 현재 상태 | 근거 |
+|---|---|---|
+| Native DSP | 구현됨 | `audio-engine/src/main/cpp/core/loudness/` |
+| Kotlin API | 구현됨 | `AudioEngine.setLoudnessCompensationEnabled`, `setLoudnessCompensationVolume`, `setLoudnessEqEnabled`, `updateLoudnessEqSettings` |
+| 엔진 cascade | 구현됨 | `manual → autoEqPreamp → autoEq → loudnessComp → loudnessEq → softLimiter` |
+| 기준 알고리즘 | 구현됨 | ISO 226:2023 equal-loudness compensation, ITU-R BS.1770 K-weighted auto-leveler |
+| 앱 UI 노출 | 현재 릴리스 후보의 주 UX 범위 밖 | `app/src/main`에서 loudness API를 직접 호출하는 설정 UI 없음 |
+| 검증 | 구현/참조 테스트 존재 | `Iso226ReferenceTest`, `Bs1770AutoLevelerReferenceTest`, `LoudnessCompensatorTest`, `RangeValidationTest` |
+
+이 문서는 더 이상 "미구현 기능 제안서"가 아니다. 현재 기준으로는 **엔진 기능은 구현되어 있고, 제품 UI 노출과 사용자 설정 UX가 후속 범위**다.
 
 ---
 
 ## 1. 무엇이고 왜 필요한가
 
-### 1-1. 사람 귀의 비밀 — Fletcher-Munson curves
+사람 귀는 모든 주파수를 똑같이 듣지 않는다. 작은 볼륨에서는 저음과 초고음이 상대적으로 약하게 들리고, 큰 볼륨에서는 대역 간 균형이 더 평탄하게 느껴진다. AuralTune의 loudness compensation은 이 차이를 보정하기 위해 재생 볼륨 또는 지각 loudness 기준으로 보정량을 계산한다.
 
-사람 귀는 **모든 주파수를 똑같이 듣지 않는다.** 1933년 Fletcher와 Munson이 처음 측정한 이래로, 현대 표준(ISO 226:2023)이 이를 정량화했다.
-
-```
-음량이 작을수록 → 저음(20-200 Hz)과 초고음(10 kHz+)이 약하게 들림
-음량이 클수록   → 주파수 대역 간 균형이 자연스럽게 평탄해짐
+```text
+재생 볼륨 80 phon 근처 → 보정 거의 없음
+재생 볼륨이 낮아짐     → 저역/고역 보정 증가
 ```
 
-**예시:** 콘서트장(100 dB SPL)에서 들은 음악을 작은 볼륨(40 dB SPL, 도서관 수준)으로 재생하면:
-
-- 저음(베이스, 드럼 킥)이 **사라진 듯** 들림
-- 고음(심벌, 보컬 시빌런스)도 약해짐
-- 중역(보컬, 기타)만 또렷이 들리는 "얇은" 소리가 됨
-
-**원인:** 청각 임계값이 주파수마다 다르다. 스튜디오 엔지니어는 대개 75-85 dB SPL로 믹싱하는데, 사용자가 작은 볼륨으로 재생하면 그 균형이 깨진다.
-
-### 1-2. Loudness Compensation이 하는 일
-
-**재생 볼륨이 작아질수록 저음/고음을 자동으로 부스트해서 청각상의 음색 균형을 유지**한다.
-
-```
-재생 볼륨 80 dB → 부스트 0 dB (원음 그대로)
-재생 볼륨 60 dB → 저음 +6 dB, 고음 +2 dB (도서관 볼륨 보정)
-재생 볼륨 40 dB → 저음 +12 dB, 고음 +4 dB (속삭이는 볼륨 보정)
-```
-
-옛 Hi-Fi 앰프의 "Loudness" 버튼이 정확히 이것이다. 다만 옛 버튼은 고정 곡선이었고, 현대 구현은 입력 신호의 실시간 음량을 측정해서 **동적으로** 보정한다.
+AutoEQ가 헤드폰의 물리적 주파수 응답을 정적으로 보정한다면, loudness compensation은 사용자 볼륨과 입력 loudness에 따라 청각 균형을 동적으로 보존한다.
 
 ---
 
-## 2. AuralTune에서의 구현 방향
-
-Loudness compensation을 추가할 경우 AuralTune Android 모듈에는 다음 구성요소가 필요하다.
+## 2. 엔진 구성
 
 | 구성요소 | 역할 |
 |---|---|
-| K-weighting filter | ITU-R BS.1770 K-weighting — 사람 귀가 인지하는 음량을 측정하기 위한 사전 필터 (저역 컷 + 고역 보정 shelf) |
-| Loudness detector | K-weighted RMS로 현재 입력 LUFS 측정 |
-| ISO 226 contours | ISO 226:2023 equal-loudness contour — 29개 1/3 옥타브 주파수에 대한 αf, Lu, Tf 계수 테이블 |
-| Gain computer | 측정된 LUFS와 target LUFS의 차이로 각 주파수 대역 보정량 계산 |
-| Gain smoother | Asymmetric attack/release — 음량 변화 시 EQ가 펌핑하지 않도록 부드럽게 |
-| Loudness EQ math | 위 결과를 biquad shelf로 변환 |
-| Loudness settings | 설정 (target LUFS, attack/release 시간 등) |
-| Loudness processor | 메인 처리 클래스 |
-| Loudness controller | UI/설정과 오디오 처리 계층을 연결하는 컨트롤러 |
+| `IsoContours` | ISO 226:2023 equal-loudness contour 상수와 보정 gain 계산 |
+| `LoudnessCompensator` | ISO 226 보정 곡선을 4-section RBJ cascade로 근사 |
+| `KWeightingFilter` | ITU-R BS.1770 loudness 측정용 K-weighting 필터 |
+| `GainComputer` | target loudness와 현재 loudness 차이를 gain으로 변환 |
+| `GainSmoother` | attack/release smoothing으로 펌핑 억제 |
+| `LoudnessEqualizer` | BS.1770 기반 auto-leveler 처리 |
+| `LoudnessEqualizerSettings` | target, boost/cut cap, compressor, attack/release 설정 |
 
-### 2-1. 핵심 알고리즘
-
-```
-1. 입력 신호 → K-weighting 필터 → 인지 음량(LUFS) 측정
-2. target 음량(예: -23 LUFS)과의 차이 계산
-3. ISO 226 contour를 사용해 주파수별 보정량 계산
-4. low-shelf + high-shelf biquad로 적용
-5. attack/release smoothing으로 펌핑 방지
-```
-
-### 2-2. ISO 226:2023 equal-loudness contour 발췌
+엔진 처리 순서는 다음과 같다.
 
 ```text
-// 1/3 옥타브 frequencies, 20 Hz ~ 12.5 kHz
-[20, 25, 31.5, 40, 50, 63, 80, 100, 125, 160, 200, 250, 315, 400,
- 500, 630, 800, 1000, 1250, 1600, 2000, 2500, 3150, 4000, 5000,
- 6300, 8000, 10000, 12500]
-
-// 각 주파수의 loudness perception exponent αf
-[0.635, 0.602, 0.569, 0.537, ..., 0.354]
+Manual EQ
+→ AutoEQ preamp
+→ AutoEQ
+→ ISO 226 Loudness Compensation
+→ BS.1770 Loudness Equalizer
+→ Soft Limiter
+→ NaN guard
 ```
 
-이 테이블 + 사용자 현재 음량 → 주파수별 보정 dB 양 계산.
+두 loudness stage는 기본적으로 host/API에서 명시적으로 켜야 한다. 현재 앱 릴리스 후보의 주요 UX는 AutoEQ/OPRA/Graphic/Parametric EQ이며, loudness 설정 UI는 별도 제품 결정이 필요하다.
 
 ---
 
 ## 3. AutoEQ와의 차이
 
-| | **AutoEQ (headphone correction)** | **Loudness compensation** |
+| 항목 | AutoEQ | Loudness Compensation |
 |---|---|---|
-| 목적 | 헤드폰의 **물리적 주파수 응답 왜곡** 보정 | 사람 귀의 **음량별 비선형 민감도** 보정 |
-| 기준 | 측정자(oratory1990 등)의 헤드폰 측정값 | ISO 226:2023 equal-loudness contours |
-| 입력 | 헤드폰 모델 ID | 실시간 재생 음량 측정 |
-| 동작 | 정적 (한 번 적용 후 고정) | 동적 (음량 변화에 따라 실시간) |
-| 필요 데이터 | AutoEQ GitHub 카탈로그 | ISO 표준 테이블 (앱 내장) |
-| 음원 의존성 | 헤드폰만 | 마스터링된 reference level (-14~-23 LUFS) |
-| 같이 쓸 수 있나 | **YES** — 직렬 cascade로 둘 다 적용 가능 | |
-
-**둘은 완전히 직교 (orthogonal)** 한 기능이다. AutoEQ가 "이 헤드폰의 결함을 펴는 것"이라면, Loudness compensation은 "사용자 볼륨에 따라 청각 균형을 보존하는 것"이다.
-
-추가할 경우 AuralTune에서는 두 기능을 **별도 chain**으로 직렬 적용할 수 있다:
-
-```
-[Manual EQ] → [AutoEQ] → [Loudness Compensation] → [Limiter]
-```
+| 목적 | 헤드폰의 물리적 응답 보정 | 볼륨별 청각 민감도 보정 |
+| 입력 | 헤드폰 모델/측정 프로파일 | 시스템 볼륨 또는 입력 loudness |
+| 동작 | 정적 프로파일 | 동적 보정 |
+| 데이터 | AutoEQ catalog/profile | ISO 226 표준 테이블, BS.1770 측정 |
+| UI 상태 | 현재 앱 핵심 UX | 엔진 구현됨, 앱 노출은 후속 |
+| 같이 사용 | 가능 | 가능 |
 
 ---
 
-## 4. (이력) 초기 dev-plan에서 제외됐던 이유
+## 4. 검증 기준
 
-> 아래는 **초기 MVP dev-plan 시점의 제외 사유**다. 이후 코어 DSP(`core/loudness/`)는 구현되어 엔진 cascade에 포함됐다. 역사적 맥락으로 보존한다.
+| 검증 | 상태 | 위치 |
+|---|---|---|
+| ISO 226 reference parity | 구현 | `audio-engine/src/test/java/com/coreline/audio/loudness/Iso226ReferenceTest.kt` |
+| BS.1770 auto-leveler reference | 구현 | `audio-engine/src/test/java/com/coreline/audio/loudness/Bs1770AutoLevelerReferenceTest.kt` |
+| Native loudness compensator | 구현 | `audio-engine/src/test/cpp/LoudnessCompensatorTest.cpp` |
+| Engine integration/range guard | 구현 | `audio-engine/src/test/cpp/RangeValidationTest.cpp` |
+| 앱 UX 회귀 | 후속 | loudness UI가 제품 범위에 들어올 때 별도 추가 |
 
-초기 `dev-plan`은 **AutoEQ headphone correction**으로 명시 범위를 한정했다 ([개발 목적/제외 범위](../dev-plan/implement_20260507_223901.md#개발-범위) 참조). 당시 이유:
-
-1. **별도 기능, 별도 복잡성**
-   - ISO 226 테이블, K-weighting 필터, gain smoother 등 추가 8개 클래스가 필요
-2. **다른 production gate 필요**
-   - AutoEQ는 정적이라 frequency response golden test로 검증되지만, loudness comp는 시간영역 펌핑/release 행동을 검증해야 함
-3. **MVP 우선순위**
-   - AutoEQ 6,000개 헤드폰 카탈로그는 그 자체로 사용자에게 큰 가치
-   - loudness comp는 "있으면 좋은" 보조 기능
+릴리스 후보의 현재 핵심 검증은 AutoEQ/OPRA 적용, 플레이어 경로, release gate, 16KB alignment, debug marker scan이다. Loudness DSP는 엔진 기능으로 유지하되, 앱 사용자 기능으로 노출하려면 별도 UX와 설정 persistence, on/off 상태 표시, 청감 QA가 필요하다.
 
 ---
 
-## 5. Android에 추가한다면 — 작업량 견적
+## 5. 제품화 시 남은 작업
 
-| 작업 | 예상 LOC | 비고 |
-|---|---:|---|
-| `IsoContoursTable.kt` (29 freq × 3 coeff) | ~200 | ISO 226 표준 테이블 기반 |
-| Native: `KWeightingFilter` (TDF2 biquad 2단) | ~100 | C++ |
-| Native: `LoudnessDetector` (RMS + LUFS 변환) | ~150 | RT-safe 통계 |
-| Native: `GainComputer` + `GainSmoother` | ~250 | attack/release |
-| Native: `LoudnessShelf` (low+high shelf 동적 적용) | ~150 | 기존 `BiquadFilter` 재사용 |
-| JNI 확장 + 새 chain stage | ~100 | `EngineSnapshot`에 loudness 섹션 추가 |
-| Kotlin: target LUFS 설정 UI + 토글 | ~200 | DataStore + Compose |
-| 테스트: pumping behavior + ISO 226 reference | ~300 | scipy 기반 reference 가능 |
-
-**총 ~1,450 LOC, 별도 dev-plan으로 1-2주 작업 분량.**
+| 항목 | 필요 조치 |
+|---|---|
+| UX 결정 | Auto-leveler와 ISO 226 compensation을 한 기능으로 노출할지, 별도 토글로 나눌지 결정 |
+| 설정 저장 | target loudness, max boost/cut, attack/release, compensation enable 상태를 DataStore에 저장 |
+| Player 연동 | 시스템 볼륨 변화 또는 플레이어 loudness 측정값을 엔진 API에 전달 |
+| 접근성/i18n | 기능 설명, 토글, 위험 안내 문자열 리소스화 |
+| 청감 QA | 작은 볼륨/큰 볼륨, 다양한 장르, AutoEQ/OPRA 병행 시 artifact 확인 |
 
 ---
 
-## 6. 추가 시 검증해야 할 production gate
-
-AutoEQ가 frequency response golden test로 검증되는 것과 별도로, loudness comp는 다음을 검증해야 한다:
-
-1. **ISO 226 reference parity** — 측정된 contour를 ISO 226:2023 표준 테이블과 ±0.5 dB 이내로 비교
-2. **K-weighting filter 응답** — ITU-R BS.1770 specification (low-pass + high-shelf)과 ±0.1 dB 이내로 비교
-3. **Pumping/breathing 부재** — 1 kHz tone 입력 음량을 -40 dB → 0 dB로 step 변경 시 출력에 audible artifact 없음
-4. **Attack/release 시정수** — step input에 대해 90% 도달 시간이 설정값(예: attack 50ms / release 200ms)과 ±10% 이내
-5. **음량 범위 안정성** — -60 dBFS ~ 0 dBFS 입력 전 범위에서 NaN/Inf/비정상 출력 없음
-6. **AutoEQ와 함께 사용 시 cascade 안정성** — AutoEQ + loudness comp + limiter 직렬에서 click/pop 0회
-
----
-
-## 7. 참고 표준 / 자료
+## 참고 표준 / 자료
 
 - **ISO 226:2023** — Acoustics — Normal equal-loudness-level contours
-- **ITU-R BS.1770-5** — Algorithms to measure audio programme loudness and true-peak audio level (K-weighting filter spec)
+- **ITU-R BS.1770-5** — Algorithms to measure audio programme loudness and true-peak audio level
 - **ITU-R BS.1771** — Requirements for loudness and true-peak indicating meters
-- **EBU R 128** — Loudness normalization and permitted maximum level of audio signals (방송용 LUFS target = -23 LUFS)
+- **EBU R 128** — Loudness normalization and permitted maximum level of audio signals
 - **AES TD1004** — Recommendations for Loudness of Internet Audio Streaming
-- Fletcher, H. and Munson, W.A. (1933) "Loudness, its definition, measurement and calculation" — JASA 5, 82-108
 
 ---
 
 ## 한 줄 요약
 
-> **AutoEQ가 "헤드폰을 평탄하게 만드는 정적 보정"이라면, Loudness compensation은 "재생 볼륨에 따라 사람 귀의 비선형 응답을 동적으로 메우는 보정"이다.** 두 기능은 직교하며, 함께 cascade로 적용할 수 있다. AuralTune Android에서는 dev-plan 범위에서 제외했으며, 추가 시 ~1,450 LOC + 별도 production gate가 필요하다.
+> AuralTune의 loudness compensation은 **엔진/DSP 레벨에서는 구현 완료**이고, 현재 릴리스 후보에서는 **사용자 노출 UI와 제품 설정 UX가 후속 범위**다.

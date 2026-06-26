@@ -1,0 +1,4 @@
+Preamp: -6.0 dB
+Filter 1: ON PK Fc NaN Hz Gain 4.0 dB Q 1.41
+Filter 2: ON PK Fc 105 Hz Gain Infinity dB Q 0.7
+Filter 3: ON PK Fc -20 Hz Gain 3.0 dB Q 1.0

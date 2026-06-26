@@ -275,34 +275,120 @@ class DeltaSyncTest {
 
     /**
      * GitHub's compare API caps files[] at 300; beyond that the overflow is silently
-     * dropped. syncDelta() must NOT half-apply such a delta: it returns Failed and leaves
-     * the stored commit at the base (NOT advanced to HEAD), and performs NO profile fetches.
-     * The guard short-circuits BEFORE the INDEX reconcile, so index hits are 0 as well.
+     * dropped. syncDelta() must NOT half-apply such a delta: it falls back to a full
+     * catalog resync, invalidates built-in/fetched profile rows so future resolves fetch
+     * current upstream values on demand, keeps imported profiles, and advances the commit
+     * only after that resync succeeds.
      */
     @Test
-    fun `truncation guard - 300 compare files returns Failed and does not advance commit`() = runBlocking {
-        // Build EXACTLY 300 distinct ParametricEQ.txt file entries (== the cap → guard trips).
+    fun `truncation guard - 300 compare files performs full catalog resync`() = runBlocking {
+        // Build EXACTLY 300 distinct ParametricEQ.txt file entries (== the cap → fallback).
         val files = (1..300).joinToString(",") { i ->
             """{"filename":"results/oratory1990/over-ear/Bulk$i/Bulk$i ParametricEQ.txt","status":"modified"}"""
         }
         val client = routingClient(head = "commitB", compareFiles = files)
         val repo = newRepo(client)
-        catalogStore.setAutoEqCommit("commitA", System.currentTimeMillis())
+        val now = System.currentTimeMillis()
+        catalogStore.setAutoEqCommit("commitA", now)
+        catalogStore.applyRemote(
+            com.coreline.autoeq.parser.IndexMdParser.parse(indexMd),
+            now,
+            null,
+            null,
+        )
+        val id = fooEntryId()
+        val fetched = com.coreline.autoeq.parser.ParametricEqParser.parse(
+            text = fooProfileTxt,
+            name = "Foo",
+            id = id,
+            measuredBy = "oratory1990",
+        )
+        assertTrue(fetched is com.coreline.autoeq.model.ParseResult.Success)
+        profileStore.upsert(
+            (fetched as com.coreline.autoeq.model.ParseResult.Success).profile,
+            "u",
+            "s",
+            now,
+        )
+        val imported = com.coreline.autoeq.parser.ParametricEqParser.parse(
+            text = fooProfileTxt,
+            name = "Imported Foo",
+            id = "imported-foo",
+            measuredBy = null,
+            source = com.coreline.autoeq.model.AutoEqSource.IMPORTED,
+        )
+        assertTrue(imported is com.coreline.autoeq.model.ParseResult.Success)
+        profileStore.upsert(
+            (imported as com.coreline.autoeq.model.ParseResult.Success).profile,
+            "local",
+            "local-sha",
+            now,
+        )
+        assertEquals("precondition: fetched + imported profiles", 2, db.profileDao().count())
 
         val result = repo.syncDelta()
 
-        assertTrue("expected Failed for an oversized delta, was $result", result is DeltaResult.Failed)
-        assertTrue(
-            "Failed reason should mention size/resync, was '${(result as DeltaResult.Failed).reason}'",
-            result.reason.contains("too large") || result.reason.contains("resync"),
+        assertTrue("expected FullResynced for an oversized delta, was $result", result is DeltaResult.FullResynced)
+        result as DeltaResult.FullResynced
+        assertEquals(300, result.changedFileCount)
+        assertEquals("full INDEX contained one test entry", 1, result.catalogEntries)
+        assertEquals("only the fetched profile should be invalidated", 1, result.invalidatedProfiles)
+        assertEquals("commit advances after full resync", "commitB", result.toCommit)
+        assertEquals("commit persisted after full resync", "commitB", catalogStore.autoEqCommit())
+        assertNull("fetched Foo profile should be invalidated", profileStore.read(id, System.currentTimeMillis()))
+        assertNotNull(
+            "imported profiles are user data and must survive full resync",
+            profileStore.read("imported-foo", System.currentTimeMillis()),
         )
-        // C: commit must NOT advance — still the base, setAutoEqCommit was never reached.
-        assertEquals("commit MUST stay at base (no half-apply)", "commitA", catalogStore.autoEqCommit())
-        // No work past the guard.
         assertEquals("HEAD probed once", 1, count("commits"))
         assertEquals("compare fetched once", 1, count("compare"))
-        assertEquals("no profile fetches when guard trips", 0, count("profile"))
-        assertEquals("no INDEX reconcile when guard trips", 0, count("index"))
+        assertEquals("full resync fetches the INDEX once", 1, count("index"))
+        assertEquals("no profile fetches during full catalog resync", 0, count("profile"))
+    }
+
+    @Test
+    fun `truncation guard - failed full catalog resync keeps base commit and profiles`() = runBlocking {
+        val files = (1..300).joinToString(",") { i ->
+            """{"filename":"results/oratory1990/over-ear/Bulk$i/Bulk$i ParametricEQ.txt","status":"modified"}"""
+        }
+        val client = routingClient(
+            head = "commitB",
+            compareFiles = files,
+            indexBody = "not an INDEX.md list",
+        )
+        val repo = newRepo(client)
+        val now = System.currentTimeMillis()
+        catalogStore.setAutoEqCommit("commitA", now)
+        catalogStore.applyRemote(
+            com.coreline.autoeq.parser.IndexMdParser.parse(indexMd),
+            now,
+            null,
+            null,
+        )
+        val id = fooEntryId()
+        val parsed = com.coreline.autoeq.parser.ParametricEqParser.parse(
+            text = fooProfileTxt,
+            name = "Foo",
+            id = id,
+            measuredBy = "oratory1990",
+        )
+        assertTrue(parsed is com.coreline.autoeq.model.ParseResult.Success)
+        profileStore.upsert(
+            (parsed as com.coreline.autoeq.model.ParseResult.Success).profile,
+            "u",
+            "s",
+            now,
+        )
+
+        val result = repo.syncDelta()
+
+        assertTrue("expected FullResyncRequired when the fallback INDEX is malformed, was $result", result is DeltaResult.FullResyncRequired)
+        assertEquals("commit MUST stay at base when full resync fails", "commitA", catalogStore.autoEqCommit())
+        assertNotNull("existing profile is preserved when fallback fails", profileStore.read(id, System.currentTimeMillis()))
+        assertEquals("HEAD probed once", 1, count("commits"))
+        assertEquals("compare fetched once", 1, count("compare"))
+        assertEquals("fallback INDEX fetched once", 1, count("index"))
+        assertEquals("no profile fetches when fallback fails", 0, count("profile"))
     }
 
     // ---------- ADVERSARIAL #2: encoded non-ASCII path match (decode fallback) ----------

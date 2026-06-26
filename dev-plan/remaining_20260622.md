@@ -1,14 +1,14 @@
 # 남은 작업 정리 (Remaining Backlog)
 
-> 생성: 2026-06-22 · 갱신: 2026-06-24
+> 생성: 2026-06-22 · 갱신: 2026-06-26
 > 출처: `implement_20260622_110525.md`(Phase 1–7) + `implement_20260617_122721.md`(멀티 프론트엔드 T1/T2/T3) + `implement_20260622_092110.md`(그래픽 EQ)
 > 이 문서는 "무엇이 남았는지"의 단일 인덱스. 실제 착수 시 해당 Phase 문서를 갱신한다.
 
 ---
 
-## 🟦 2026-06-24 현재 상태 (정합화)
+## 🟦 2026-06-26 현재 상태 (정합화)
 
-핵심 사용자 가치는 모두 완료되어 **`main`에 푸시됨**(commit `87079fc`). 이후 추가 완료:
+핵심 사용자 가치는 `main` 기준으로 완료되었고, 2026-06-26 남은 작업 패치는 **현재 작업트리(커밋 전)**에 반영되어 있다. 최신 기준:
 - ✅ 그래픽 EQ 게인 한계 칩(±6/±12/±15/±20, 불변식 강제) + 프리앰프 마커선 + preamp 적용 시 곡선 평행 하강
 - ✅ AutoEQ ON/OFF **0.5초 선형 wet/dry 크로스페이드**("스르륵") + kill switch **즉시 차단**(4-렌즈 적대적 리뷰: kill 잔존·램프 off-by-one 수정)
 - ✅ recents 빠른선택 스피너(큐레이션 pre-seed), SAF 곡 선택(+ActivityNotFound 가드), 빈상태 문구 분기
@@ -28,7 +28,7 @@
 - **T2-Custom / T3(HAL)** + **M0 effect `.so` 분리** — 외부/전역 + 루트 필요 → 불필요
 - 관련 코드는 휴면 보존(삭제 안 함): `app/.../audio/audiofx/*`, `src/debug/.../AudioFxSessionProbe.kt`, PoC 카드. 멀티프론트엔드 계획(`implement_20260617_122721.md`)·coverage 조사는 보관(archived).
 
-**여전히 남음(T1 범위 내, 낮음):** Phase 4b(FTS/migration test/ETag 회귀), query-driven 온라인 검색 fallback, 하이레이트 직접재생(24/32·384k AudioTrack), 프로파일 교체 크로스페이드, release APK analyzer 자동화, 300+ delta full-resync.
+**현재 남음(T1 범위 내):** OPRA 상업 출시용 EULA/OSS/스토어 문구의 최종 법무 검토, 기기별 오디오 라우트 수동 QA 실측 채우기. CI release debug-marker scan, AutoEQ DB 회귀 테스트(Migration/ETag/malformed index/stored-filter 동치), 300+ delta cap 초과의 전체 카탈로그 resync fallback + UI 안내는 `implement_20260626_144046.md`에서 패치 완료. query-driven 온라인 검색 fallback, 하이레이트 직접재생(24/32·384k AudioTrack), 그래픽 EQ 기본 프리셋/Q 튜닝은 선택 후속으로 유지.
 
 ---
 
@@ -54,55 +54,53 @@
 > 상세: `dev-plan/implement_20260623_090000.md`
 - **전체 프로파일 prebuilt seed** ✅: catalog **6,028** + profiles **6,027** + filters **60,270** → `autoeq_seed.db`(11.65MB, APK +3.45MB) createFromAsset. 검색→선택→**적용까지 즉시·오프라인**. QA: createFromAsset 오픈(identityHash 일치)+카운트+샘플 검증.
 - **증분(delta) 갱신** ✅: `syncDelta()` GitHub compare API — 변경분만 fetch/upsert, removed 삭제, NoChange 0다운로드, kill switch 차단. QA 7테스트 + 엣지 2건 수정(300-file 페이지네이션→Failed·커밋미전진 / 비ASCII·`+` 경로 URLDecoder fallback).
-- 후속: 실기기 오프라인 즉시적용 검증(삼성·데이터초기화), 번들 INDEX.md 중복 제거, 300+ delta full-resync 경로 + 백그라운드 트리거/UI.
+- 후속: 실기기 오프라인 즉시적용 검증(삼성·데이터초기화), 번들 INDEX.md 중복 제거. 300+ delta는 cap 초과 시 partial apply를 금지하고 전체 INDEX를 재적용한 뒤 built-in/fetched 프로파일을 on-demand 재다운로드 대상으로 무효화한다. 전체 프로파일 6천여 개 즉시 재다운로드는 출하 UX/네트워크 리스크로 제외했다.
 
 ## 🟢 추가 완료 (2026-06-22 후속 세션 — 병렬 분석 + 전담 QA 적대적 검증)
 
-### Phase 7 — 통합 검증 + 문서 정합  ·  상태 `~` (릴리스 게이트 보강)
-- **완료**: 적대적 릴리스 감사로 **미게이트 PII 로그 누수 발견·수정**(MusicPlayerController/DeviceAutoEqManager `Log` → `BuildConfig.DEBUG` gate), proguard `-assumenosideeffects Log{v,d,i}` 추가. QA 재감사: release dex PII 문자열 **0건**, probe TAG도 **0건**(proguard가 미게이트 probe까지 제거), 16KB 정렬 PASS, manifest 권한 정확히 5개. 이후 OPRA/플레이어/스펙트럼 workstream 반영 기준 테스트 목표는 **217개**(71/96/27/23). README/디자인핸드오프는 탭별 독립선택, OPRA parser-version force import, 큐 영속화, 실시간 스펙트럼, release marker gate 기준으로 갱신.
-- **남은**: [ ] GitHub 원격 배치 시 `ci/android.yml`을 실제 `.github/workflows/android.yml` 위치로 복사/동기화, [ ] 기기별 오디오 라우트 수동 spot check 기록.
+### Phase 7 — 통합 검증 + 문서 정합  ·  상태 `x` (릴리스 게이트 보강 완료, 외부 수동 증적만 잔여)
+- **완료**: 적대적 릴리스 감사로 **미게이트 PII 로그 누수 발견·수정**(MusicPlayerController/DeviceAutoEqManager `Log` → `BuildConfig.DEBUG` gate), proguard `-assumenosideeffects Log{v,d,i}` 추가. QA 재감사: release dex PII 문자열 **0건**, probe TAG도 **0건**(proguard가 미게이트 probe까지 제거), 16KB 정렬 PASS, manifest 권한 정확히 5개. 이후 OPRA/플레이어/스펙트럼/파라메트릭/DB/라우트 정책 회귀 hardening 반영 기준 테스트 목표는 **246개**. README/디자인핸드오프는 탭별 독립선택, OPRA parser-version force import, 큐 영속화, 실시간 스펙트럼, release marker gate 기준으로 갱신.
+- **완료(2026-06-26)**: release debug-marker scan을 `.github/workflows/android.yml` 자동 gate로 편입하고, AutoEQ DB 회귀 테스트(Migration/ETag/malformed index/stored-filter 동치)와 300+ delta 전체 카탈로그 resync fallback/UX 안내를 추가했다.
+- **남은**: [ ] 기기별 오디오 라우트 수동 spot check 증적 채우기(유선/Bluetooth/USB/스피커/HDMI 물리 연결 필요).
 
 ### Phase 1 — Release DEBUG gate  ·  상태 `x` (완료 — facade 포함)
 - **완료**: 미디어 권한 `src/debug` manifest 분리 + 모든 debug 코드 `BuildConfig.DEBUG` gate + proguard Log strip.
 - **완료 (A1)**: ✅ `DebugSupport` 파사드(`src/debug`=실제 firstPlayableUri+AudioFxProbeCard / `src/release`=no-op) + `AudioFxSessionProbe.kt`를 src/debug로 이동. **QA 검증: main-source 참조 0건, release dex에 probe 클래스·디버그 문자열 구조적 부재(0), debug 빌드엔 기능 유지, lintVital release clean.**
 
 ### 신규 항목 (QA 식별)
-- [ ] **allowBackup 결정** (MEDIUM): `android:allowBackup="true"` + 백업 규칙 없음. per-device EQ 선택/device-key 해시가 백업 대상. → `allowBackup=false` 또는 `dataExtractionRules` allowlist. **사용자 결정 필요**(프리셋 백업 vs 프라이버시 트레이드오프).
+- [x] **allowBackup 결정** (MEDIUM): `android:allowBackup="false"` + `data_extraction_rules.xml` 전 도메인 제외로 확정. per-device EQ 선택/device-key 해시는 백업되지 않는다.
 
 ---
 
-## 🟠 진행 중 (부분 완료, 후속 정밀화 필요)
+## 🟠 선택 후속 / 수동 검증
 
 ### Phase 4 — Room DB-first catalog  ·  상태 `~` (4a + tombstone 완료)
-- **완료(4a)**: Room v1, 번들 INDEX.md 첫 실행 seed, ETag 조건부 갱신, 레거시 catalog.json 마이그레이션, 오프라인 검색(실기기).
+- **완료(4a)**: Room v1, 현재 prebuilt `autoeq_seed.db` 첫 실행 seed, ETag 조건부 갱신, 레거시 catalog.json/INDEX.md seed fallback, 오프라인 검색(실기기).
 - **완료(4b 일부)**: ✅ **tombstone sweep**(`CatalogDao.tombstoneOlderThan` + `applyRemote` 전체 동기화 시 제거 항목 isDeleted) — QA 적대적 검증(동일 ms 이중동기화/빈리스트 무wipe/시계역행 회귀가드 3개) 통과.
+- **완료(2026-06-26)**: Room v1→v2 schema-open migration test, ETag 304 no-op, malformed index 기존 DB 보존, stored-filter/parser 동치 테스트 추가.
 - **남은 (Phase 4b 후속)**:
   - [ ] `catalog_fts`(FTS4/5) 테이블로 DB-side 검색 성능 강화 (현재는 메모리 fuzzy index — 충분히 빠름)
-  - [ ] Room `MigrationTestHelper` 기반 migration test (현재 v1→v2 실기기 검증으로 대체됨)
-  - [ ] ETag 회귀 테스트: unchanged → DB write 0, malformed index → 기존 DB 보존
+  - [x] Room `MigrationTestHelper` 기반 migration test 또는 schema-open 회귀 테스트
+  - [x] ETag 회귀 테스트: unchanged → DB write 0, malformed index → 기존 DB 보존
   - 우선순위: **낮음** · 규모: S–M · 사유: 핵심 정합(tombstone)은 완료. FTS는 성능 최적화(불요불급).
 
 ---
 
 ## 🟡 신규 착수 대기 Phase
 
-### Phase 6 — T2-OS MusicFX 외부앱 근사 EQ  ·  상태 `~` (피팅/백엔드 코드 완료)
+### Phase 6 — T2-OS MusicFX 외부앱 근사 EQ  ·  상태 `보류` (피팅/백엔드 코드는 휴면 보존)
 > 외부 플레이어가 effect-control-session을 제공할 때만 OS AudioEffect로 근사 EQ를 attach.
 - **완료(코드)**: ✅ 6-2 `OsEffectBackend`(DynamicsProcessing API28+ / Equalizer fallback, attach 팩토리, 생성자 누수 가드) · ✅ 6-3 `ExternalAudioFxController`(OPEN/CLOSE 수신, session map, timeout release, provider 예외 가드, close 메인스레드 confine) · ✅ 6-4 `AutoEqApprox`(자체 freqz 타깃 → OS 밴드 fitting + RMS/max dB 오차, 단위테스트). **QA가 `gridPoints≤1` NaN 버그 발견 → 수정·green.**
-- **남은**:
-  - [ ] 6-1 **coverage gate**(기기 필요): Spotify/YouTube/Samsung Music 등 OPEN/CLOSE 수신 실측표 — `AudioFxSessionProbe`로 측정. **외부앱·계정·수동재생 필요.**
-  - [ ] 6-5 internal A/B: 자체 `.so` 정밀 경로와 T2 effect 동시 적용 금지(택일) 가드
-  - [ ] 6-6 UX: "근사/지원 앱 한정/기기 의존" 표시 + 와이어링(현재 컨트롤러 미기동)
-  - [ ] 6-7 실기기 검증: 지원 앱 attach→apply→release, DynamicsProcessing/Equalizer 분기
-  - 우선순위: **중** · 규모: 남은 부분 M · 사유: 코드 기반은 섰고, **가치는 coverage(외부앱 실측)에 좌우**. 기기·외부앱 확보 후 6-1부터.
+- **남은**: 없음(현재 출시 범위에서는 제외). 필요 시 별도 워크스트림에서 coverage gate부터 재개한다.
+- 우선순위: **보류** · 규모: M · 사유: 사용자 결정으로 외부앱/시스템 전역은 제외.
 
 ### Phase 7 — 통합 검증 및 문서 정합화  ·  상태 `[~]`
 - [x] 검증 명령 일괄 대상 갱신: `compileDebugKotlin`+모든 모듈 `testDebugUnitTest`+`assembleRelease`
 - [x] **16KB native alignment** 확인(`llvm-readelf -l libauraltune_audio.so`, Android 15+)
-- [x] release APK analyzer로 debug class/string 노출 0 확인(apkanalyzer/dex dump) + `ci/android.yml` 자동 gate 추가
+- [x] release APK analyzer로 debug class/string 노출 0 확인(로컬 검증 완료) + `.github/workflows/android.yml` raw dex fixed-string release debug-marker scan 추가 완료. `ci/android.yml`은 pointer-only로 축소해 SSOT 충돌을 제거했고, `tools/release_readiness.ps1`로 Windows 로컬 릴리스 게이트를 재실행할 수 있다. GitHub hosted run은 다음 push/PR에서 확인.
 - [x] `README.md` 갱신: DB-first catalog, retained VM lifecycle, release gate, 현재 아키텍처
-- [ ] `docs/autoeq.md`: DB schema + fallback 흐름 / `docs/loudness-compensation.md` drift 재검토
-- [ ] dev-plan 문서들 상태 정합화
+- [x] `docs/autoeq.md`: DB schema + fallback 흐름 / `docs/loudness-compensation.md` drift 재검토 완료. AutoEQ는 prebuilt Room seed/v2 profile table/delta full-resync 흐름을 문서화했고, loudness는 엔진 구현 완료 + 앱 UI 후속 범위로 정정했다.
+- [x] dev-plan 문서들 상태 정합화(2026-06-26 릴리스 후보 기준으로 갱신 완료). 잔여는 법무 확정과 물리 라우트 QA 증적.
 - 우선순위: **높음(릴리스 직전)** · 규모: M · 사유: 릴리스 후보 고정.
 
 ---
@@ -119,9 +117,10 @@
 ## ⚪ 소규모 마무리 (Nice-to-have)
 | ID | 항목 | 규모 | 비고 |
 |---|---|---|---|
-| A2 | `ActivityScenario.recreate()` 계측 테스트(회전) | S | 실기기 회전으로 동등 검증됨 |
+| A2 | `ActivityScenario.recreate()` 계측 테스트(회전) | S | 완료: `SmokeTest.mainActivity_recreate_survives`, SM-S931N connected 13 tests PASS |
 | A3 | 그래픽 EQ default presets(코드 상수) | S | 요구 없었음 |
-| A5 | "stored filters == parser output" 동치 테스트 | S | Phase 5 보강 |
+| A5 | "stored filters == parser output" 동치 테스트 | S | 완료: `AutoEqRepositoryTest` |
+| A6 | 실제 실패 파일 fixture 주입 테스트 | S | 완료: malformed `ParametricEQ.txt` fixture 주입, DB row 미생성 확인 |
 | — | 그래픽 EQ 게인 범위 ±12↔±15, preamp 그래프 반영 여부 | S | 사용자 결정 대기(092110 Open) |
 | — | 20밴드 Q 튜닝(겹침 자연스러움) | S | 청취 기반 |
 
@@ -140,11 +139,10 @@
 
 ## 권장 진행 순서
 
-1. **Phase 7**(릴리스 검증/문서) — 지금까지 산출물을 릴리스 후보로 고정. 16KB·release leak·문서 정합.
-2. **Phase 1 A1**(src/debug facade) — 정적 위생 마무리(Phase 7과 함께 하면 시너지).
-3. **Phase 4b**(FTS/tombstone/migration test) — DB 정합/성능.
-4. **Phase 6**(T2-OS) — 외부앱 coverage 조사부터. 가치 확인 후 본구현.
-5. **query-driven 온라인 fallback** — 필요 시.
-6. (보류) **Phase F (T3)** — 별도 워크스트림.
+1. **현재 작업트리 최종 diff 검토 후 커밋** — CI gate, AutoEQ DB 테스트, delta fallback, 문서 정합화 패치를 한 묶음으로 고정.
+2. **OPRA 법무 확정 + 스토어 문구 승인** — EULA/OSS notice/스토어 설명/DRM·데이터베이스권 검토.
+3. **기기별 오디오 라우트 수동 QA 매트릭스 채우기** — 유선/Bluetooth/USB/스피커/HDMI 별 적용/clear 증적 확보.
+4. (선택) **query-driven online fallback / hi-res direct path / tuning 편의 기능** — 별도 착수.
+5. (보류) **Phase F (T3)** — 별도 워크스트림.
 
-> 비고: 핵심 사용자 가치(인앱 AutoEQ + 그래픽 EQ + 오프라인 카탈로그/프로파일 + 디바이스 독립)는 이미 동작·검증 완료. 남은 항목은 **릴리스 위생(7,1) · DB 정합 강화(4b) · 외부앱 확장(6) · 글로벌 적용(F)** 으로 분류된다.
+> 비고: 핵심 사용자 가치(인앱 AutoEQ + OPRA + 그래픽/파라메트릭 EQ + 오프라인 AutoEQ catalog/profile + bundled OPRA snapshot + 디바이스 독립)는 이미 동작·검증 완료. 남은 항목은 **최종 법무 검토 · 수동 QA 증적 · 선택 후속 기능**으로 분류한다. CI release gate, DB 정합 강화, delta cap 정책은 `implement_20260626_144046.md`에서 패치 완료했다.

@@ -557,70 +557,32 @@ private fun PlayerCorrectionControls(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                PlayerListenModeButton(stringResource(R.string.player_mode_original), mode == ListenMode.ORIGINAL) {
-                    onModeSelect(ListenMode.ORIGINAL)
-                }
-                PlayerListenModeButton(stringResource(R.string.player_mode_eq_applied), mode == ListenMode.AUTOEQ) {
-                    onModeSelect(ListenMode.AUTOEQ)
-                }
-                PlayerListenModeButton(stringResource(R.string.player_mode_custom), mode == ListenMode.USER) {
-                    onModeSelect(ListenMode.USER)
-                }
-            }
-
+            // 외곽 컨테이너 트랙 제거 — 그래픽/파라메트릭 토글과 동일한 칩(GainLimitButton)으로 통일.
+            GainLimitButton(
+                label = stringResource(R.string.player_mode_original),
+                selected = mode == ListenMode.ORIGINAL,
+                onClick = { onModeSelect(ListenMode.ORIGINAL) },
+                modifier = Modifier.weight(1f),
+            )
+            GainLimitButton(
+                label = stringResource(R.string.player_mode_eq_applied),
+                selected = mode == ListenMode.AUTOEQ,
+                onClick = { onModeSelect(ListenMode.AUTOEQ) },
+                modifier = Modifier.weight(1f),
+            )
+            GainLimitButton(
+                label = stringResource(R.string.player_mode_custom),
+                selected = mode == ListenMode.USER,
+                onClick = { onModeSelect(ListenMode.USER) },
+                modifier = Modifier.weight(1f),
+            )
+            // 프리앰프는 독립 토글이라 칩과 구분되는 자체 스타일 유지(높이만 칩과 맞춤).
             PlayerPreampButton(
                 enabled = preampEnabled,
                 onClick = onTogglePreamp,
-                modifier = Modifier.width(104.dp),
+                modifier = Modifier.width(96.dp),
             )
         }
-    }
-}
-
-@Composable
-private fun RowScope.PlayerListenModeButton(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = Modifier.weight(1f).height(36.dp),
-        shape = MaterialTheme.shapes.small,
-        border = BorderStroke(
-            if (selected) 2.dp else 1.dp,
-            if (selected) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.42f),
-        ),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (selected) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerHigh
-            },
-            contentColor = if (selected) {
-                MaterialTheme.colorScheme.onSecondaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        ),
-        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -632,8 +594,8 @@ private fun PlayerPreampButton(
 ) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.height(44.dp),
-        shape = MaterialTheme.shapes.medium,
+        modifier = modifier.height(38.dp),
+        shape = MaterialTheme.shapes.small,
         border = BorderStroke(
             if (enabled) 2.dp else 1.dp,
             if (enabled) MaterialTheme.colorScheme.secondaryContainer

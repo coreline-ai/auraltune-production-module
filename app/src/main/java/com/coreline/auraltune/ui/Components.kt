@@ -248,62 +248,33 @@ fun ListenModeBar(
             )
             Spacer(Modifier.height(8.dp))
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.medium)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .padding(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ModeButton(stringResource(R.string.listen_mode_original), mode == ListenMode.ORIGINAL) { onSelect(ListenMode.ORIGINAL) }
-                ModeButton(stringResource(R.string.listen_mode_autoeq), mode == ListenMode.AUTOEQ) { onSelect(ListenMode.AUTOEQ) }
-                ModeButton(stringResource(R.string.listen_mode_user), mode == ListenMode.USER) { onSelect(ListenMode.USER) }
+                GainLimitButton(
+                    label = stringResource(R.string.listen_mode_original),
+                    selected = mode == ListenMode.ORIGINAL,
+                    onClick = { onSelect(ListenMode.ORIGINAL) },
+                    modifier = Modifier.weight(1f),
+                )
+                GainLimitButton(
+                    label = stringResource(R.string.listen_mode_autoeq),
+                    selected = mode == ListenMode.AUTOEQ,
+                    onClick = { onSelect(ListenMode.AUTOEQ) },
+                    modifier = Modifier.weight(1f),
+                )
+                GainLimitButton(
+                    label = stringResource(R.string.listen_mode_user),
+                    selected = mode == ListenMode.USER,
+                    onClick = { onSelect(ListenMode.USER) },
+                    modifier = Modifier.weight(1f),
+                )
             }
             Spacer(Modifier.height(6.dp))
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-}
-
-/** One segment of [ListenModeBar]: filled when selected, outlined otherwise. */
-@Composable
-private fun RowScope.ModeButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) {
-        OutlinedButton(
-            onClick = onClick,
-            modifier = Modifier.weight(1f),
-            shape = MaterialTheme.shapes.small,
-            border = BorderStroke(2.dp, MaterialTheme.colorScheme.secondaryContainer),
-            colors = ButtonDefaults.outlinedButtonColors(
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-            ),
-        ) {
-            Text(
-                text = label.uppercase(),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-            )
-        }
-    } else {
-        OutlinedButton(
-            onClick = onClick,
-            modifier = Modifier.weight(1f),
-            shape = MaterialTheme.shapes.small,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
-            colors = ButtonDefaults.outlinedButtonColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
-        ) {
-            Text(
-                text = label.uppercase(),
-                style = MaterialTheme.typography.labelSmall,
-                fontWeight = FontWeight.Medium,
             )
         }
     }

@@ -58,4 +58,7 @@ interface ProfileDao {
 
     @Query("DELETE FROM profiles WHERE id IN (:ids)")
     suspend fun deleteProfiles(ids: List<String>)
+
+    @Query("DELETE FROM profiles WHERE source != :sourceToKeep")
+    suspend fun deleteProfilesExceptSource(sourceToKeep: String): Int
 }

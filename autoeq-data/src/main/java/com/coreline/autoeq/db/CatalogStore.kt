@@ -2,7 +2,8 @@
 // Phase 4: DB-first catalog orchestration on top of [CatalogDao].
 //
 // Responsibilities:
-//   - First-run offline SEED from the bundled assets/autoeq/INDEX.md (parsed via IndexMdParser).
+//   - Legacy INDEX.md seed fallback only. Current releases primarily use the
+//     prebuilt Room asset databases/autoeq_seed.db via AutoEqDatabase.createFromAsset().
 //   - One-shot MIGRATION of a legacy catalog.json list into the DB.
 //   - Serve the catalog from the DB (mapped to domain models).
 //   - Apply a remote refresh (upsert + ETag/content-hash bookkeeping).
@@ -29,8 +30,9 @@ class CatalogStore(
     suspend fun syncState(): SyncStateEntity? = dao.syncState(SyncStateEntity.KEY_CATALOG)
 
     /**
-     * Seed the DB from the bundled INDEX.md on first run, or when the bundled [seedVersion]
-     * is newer than what was imported. Returns true if a seed was applied.
+     * Legacy seed path for older/debug fixtures that still ship an INDEX.md asset.
+     * Current release builds use AutoEqDatabase.createFromAsset("databases/autoeq_seed.db"),
+     * so this method normally returns false when the legacy asset is absent.
      */
     suspend fun seedIfNeeded(nowMs: Long): Boolean {
         val state = dao.syncState(SyncStateEntity.KEY_CATALOG)
@@ -107,7 +109,7 @@ class CatalogStore(
     }
 
     companion object {
-        /** Bump when the bundled INDEX.md asset is refreshed to force a re-seed. */
+        /** Legacy INDEX.md seed version. Prebuilt DB releases do not rely on this. */
         const val SEED_VERSION = 1
         /** sync_state row key holding the AutoEq git commit (delta-sync base). */
         const val KEY_COMMIT = "autoeq_commit"

@@ -4,6 +4,7 @@
 package com.coreline.autoeq.db
 
 import com.coreline.autoeq.model.AutoEqProfile
+import com.coreline.autoeq.model.AutoEqSource
 
 class ProfileStore(private val dao: ProfileDao) {
 
@@ -29,6 +30,13 @@ class ProfileStore(private val dao: ProfileDao) {
 
     /** Remove a profile (filters cascade-delete). Used by delta sync on upstream removal. */
     suspend fun delete(id: String) = dao.deleteProfile(id)
+
+    /**
+     * Full remote resync invalidates APK-bundled/fetched rows so later profile resolves
+     * fetch current upstream data on demand. User-imported profiles are kept.
+     */
+    suspend fun deleteNonImportedProfiles(): Int =
+        dao.deleteProfilesExceptSource(AutoEqSource.IMPORTED.name)
 
     /**
      * LRU trim: keep the [keep] most-recently-accessed profiles plus everything in

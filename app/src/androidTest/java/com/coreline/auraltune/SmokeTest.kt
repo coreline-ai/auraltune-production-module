@@ -29,4 +29,20 @@ class SmokeTest {
             }
         }
     }
+
+    @Test
+    fun mainActivity_recreate_survives() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                require(!activity.isFinishing) { "Activity finished before recreate" }
+            }
+
+            scenario.recreate()
+
+            scenario.onActivity { activity ->
+                require(!activity.isFinishing) { "Activity finished after recreate" }
+                require(!activity.isDestroyed) { "Activity destroyed after recreate" }
+            }
+        }
+    }
 }

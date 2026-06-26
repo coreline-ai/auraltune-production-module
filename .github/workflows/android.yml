@@ -60,6 +60,50 @@ jobs:
         timeout-minutes: 15
         run: ./gradlew --no-daemon :app:assembleRelease
 
+      # Release gate: fail if debug-only helpers, probe strings, or engine debug markers leak
+      # into the minified APK dex. Keep this independent from apkanalyzer so CI only needs
+      # standard Android/Ubuntu tools.
+      - name: Release debug-marker scan
+        run: |
+          set -euo pipefail
+          export LC_ALL=C.UTF-8
+          APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+          if [ ! -f "$APK" ]; then
+            echo "::error::Release APK not found: $APK"
+            exit 1
+          fi
+
+          markers="$(mktemp)"
+          hits="$(mktemp)"
+          dex_dir="$(mktemp -d)"
+          trap 'rm -rf "$markers" "$hits" "$dex_dir"' EXIT
+          cat > "$markers" <<'EOF'
+AudioFxSessionProbe
+DebugSupport
+firstPlayableUri
+debug firstAudioUri
+EqState
+외부앱 신호 측정
+pushToEngine
+updateManualEq failed
+EOF
+
+          unzip -q "$APK" 'classes*.dex' -d "$dex_dir"
+          while IFS= read -r marker; do
+            while IFS= read -r dex; do
+              if grep -aFq "$marker" "$dex"; then
+                echo "$(basename "$dex"): $marker" >> "$hits"
+              fi
+            done < <(find "$dex_dir" -type f -name 'classes*.dex' | sort)
+          done < "$markers"
+
+          if [ -s "$hits" ]; then
+            echo "::error::Release APK contains debug markers"
+            sort -u "$hits"
+            exit 1
+          fi
+          echo "OK: no release debug-marker hits"
+
       # Android 15 requires 16 KB-aligned shared libraries. Verify every LOAD
       # segment of the engine .so is aligned to at least 2**14 (0x4000).
       - name: 16 KB native alignment check

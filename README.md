@@ -13,7 +13,7 @@
 [![NDK](https://img.shields.io/badge/NDK-r27.0.12077973-blue?style=flat-square)](#-build-matrix)
 [![16KB pages](https://img.shields.io/badge/16KB%20pages-✓-orange?style=flat-square)](#-correctness-invariants)
 
-[![Tests](https://img.shields.io/badge/Kotlin%20unit-236%20PASS-brightgreen?style=flat-square)](#-testing)
+[![Tests](https://img.shields.io/badge/Kotlin%20unit-246%20PASS-brightgreen?style=flat-square)](#-testing)
 [![Native tests](https://img.shields.io/badge/native%20suites-8%20PASS-brightgreen?style=flat-square)](#-testing)
 [![DSP parity](https://img.shields.io/badge/scipy.lfilter%20SNR-140--157%20dB-success?style=flat-square)](#-correctness-invariants)
 [![TSan](https://img.shields.io/badge/ThreadSanitizer-clean-success?style=flat-square)](#-correctness-invariants)
@@ -32,7 +32,7 @@ DSP-accurate biquad cascade · RT-safe atomic publish · Source-level integratio
 - 🎯 **DSP parity verified** — scipy.lfilter SNR 140–157 dB across 44.1k / 48k / 96k; freqz match to 0.0000 dB worst-case.
 - 🛡️ **TSan-clean atomic publish** — heap `EngineSnapshot` + 500 ms deferred retire closes the audio-thread / control-thread race surface end-to-end.
 - ⚡ **Zero-allocation audio callback** — single `acquire` load per buffer, no locks, no Java callbacks across the JNI boundary.
-- 🧪 **217 Kotlin unit (71 engine / 96 autoeq-data / 27 opra-data / 23 app) + 8 native suites** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
+- 🧪 **246 Kotlin unit + 8 native suites** — all green; pre-verified `LazyDeferredBehaviorTest` pins kotlinx coroutine assumptions.
 - 🆚 **OPRA comparison + A/B/C listen modes** — second data source (OPRA, CC BY-SA 4.0) bundled offline alongside AutoEq, sharing the same DSP engine; one-tap 원음 / EQ 적용 / 내 설정 (profile + graphic EQ) for instant A-B-C auditioning.
 - 🎛️ **Player-first auditioning** — local-file queue persists across restarts, the player exposes 원음/EQ 적용/커스텀 + preamp controls, and the real-time post-EQ spectrum shows bit depth / sample rate.
 - 🧱 **3-layer range validation** — Kotlin `require` → JNI guard → engine bounds-check; cross-language status code surfaces drift as `IllegalStateException`.
@@ -61,7 +61,8 @@ auraltune-production-module/
 │   ├── search/               3-tier fuzzy scoring (substring → normalized → token+edit)
 │   ├── db/                   Room: AutoEqDatabase(v2), Catalog/Profile DAO+Store, MIGRATION_1_2
 │   ├── cache/                Legacy file caches (one-shot migration sources only)
-│   └── src/main/assets/autoeq/INDEX.md     Bundled offline seed (851 KB snapshot)
+│   └── src/main/assets/databases/autoeq_seed.db
+│                              Prebuilt Room seed (catalog + parsed profiles + filters)
 │
 ├── opra-data/               # :opra-data — OPRA (Open Profiles for Revealing Audio) data layer
 │   ├── model/                OpraModel + OpraFilterType (engine-supported-filter check)
@@ -148,12 +149,12 @@ adb shell am start -n com.coreline.auraltune/.MainActivity
 
 ```bash
 ./gradlew :audio-engine:testDebugUnitTest :autoeq-data:testDebugUnitTest :opra-data:testDebugUnitTest :app:testDebugUnitTest
-# Expected: 236 tests, all PASS across :audio-engine, :autoeq-data, :opra-data, and :app
+# Expected: 246 tests, all PASS across :audio-engine, :autoeq-data, :opra-data, and :app
 ```
 
 ### 2026-06-26 Release Readiness Notes
 
-Current `main` includes the Phase 7 hardening pass:
+Current release-candidate worktree includes the Phase 7 hardening pass:
 
 - Player errors are surfaced to the user and failed tracks are removed from the queue instead of silently looping.
 - The player audio processor accepts PCM 16-bit, 24-bit, 32-bit integer, and float decode outputs, then emits 16-bit PCM for Media3 sink compatibility.
@@ -162,7 +163,18 @@ Current `main` includes the Phase 7 hardening pass:
 - OPRA search escapes SQL LIKE wildcards (`%`, `_`, `\`) so user queries are literal.
 - Adaptive launcher icon resources are tracked under `drawable/` with density PNG fallbacks.
 
-Verified locally on 2026-06-26:
+Repeat the local release gate on Windows:
+
+```powershell
+.\tools\release_readiness.ps1
+
+# Optional physical-device smoke pass:
+.\tools\release_readiness.ps1 -RunConnectedTests -AndroidSerial R3CY40PXCAP
+```
+
+The script runs the JVM unit suite, `:app:assembleRelease`, raw dex UTF-8 debug-marker scan, and 16 KB native alignment check. Connected tests remain opt-in because they require an attached Android device.
+
+Equivalent manual commands used for the 2026-06-26 local verification:
 
 ```bash
 ./gradlew.bat --no-daemon --no-build-cache "-Dkotlin.compiler.execution.strategy=in-process" \
@@ -174,21 +186,25 @@ Verified locally on 2026-06-26:
   "-Dkotlin.compiler.execution.strategy=in-process" :app:assembleRelease
 ```
 
-Validation snapshot: `236` unit tests PASS, release build PASS, APK debug-marker scan PASS, native LOAD alignment `0x4000` PASS.
+Validation snapshot: `246` unit tests PASS, release build PASS, APK debug-marker scan PASS, native LOAD alignment `0x4000` PASS.
+
+Active hosted workflow: [`.github/workflows/android.yml`](.github/workflows/android.yml). [`ci/android.yml`](ci/android.yml) is a pointer-only archive so there is one active CI source of truth.
 
 ### Run native unit tests (host JVM)
 
 ```bash
-cd audio-engine
 g++ -std=c++17 -O2 -fno-finite-math-only \
-    -I src/main/cpp \
-    src/test/cpp/AuralTuneEQEngineTest.cpp \
-    src/main/cpp/BiquadFilter.cpp \
-    src/main/cpp/AuralTuneEQEngine.cpp \
+    -I audio-engine/src/main/cpp/core \
+    audio-engine/src/test/cpp/AuralTuneEQEngineTest.cpp \
+    audio-engine/src/main/cpp/core/BiquadFilter.cpp \
+    audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp \
+    audio-engine/src/main/cpp/core/loudness/IsoContours.cpp \
+    audio-engine/src/main/cpp/core/loudness/LoudnessCompensator.cpp \
+    audio-engine/src/main/cpp/core/loudness/KWeightingFilter.cpp \
     -o /tmp/run_native_tests && /tmp/run_native_tests
 ```
 
-> See [`ci/android.yml`](ci/android.yml) for the full native-test build matrix (golden response, scipy.lfilter, snapshot race, range validation).
+Additional standalone native references live under [`audio-engine/src/test/cpp`](audio-engine/src/test/cpp). The Android release gate is tracked in the active hosted workflow above.
 
 ### Verify 16 KB page-size compliance
 
@@ -218,7 +234,7 @@ $ANDROID_HOME/ndk/27.0.12077973/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-
 | UI | **Jetpack Compose Material 3** | – |
 | DI | Manual `ServiceLocator` | no Hilt for MVP |
 | Foreground Service | **out of MVP** | playback runs only while activity is foregrounded |
-| Catalog bootstrap | **bundled `assets/autoeq/INDEX.md` seed → Room DB-first** | offline from first launch; network only refreshes (ETag) |
+| Catalog bootstrap | **prebuilt Room seed `assets/databases/autoeq_seed.db` → DB-first** | catalog + parsed profiles available offline from first launch; network only refreshes delta/full catalog when requested or on cooldown |
 | Profile ID | `sha256(source\|relativePath\|name).take(24)` | not slug |
 
 ---
@@ -269,10 +285,10 @@ repo.close()                              // cancels all inflight HTTP work
 | Suite | Count | Type | Purpose |
 |---|---|---|---|
 | `:audio-engine` Kotlin unit | **71** | Robolectric + ShadowAudioEngine | API contracts, lifecycle DSL, builder, range gates, native-create failure, native-update rejection |
-| `:autoeq-data` Kotlin unit | **96** | Robolectric + OkHttp interceptor + in-memory Room | Parsers, caches, DB-first repo (catalog seed, tombstone sweep, profile DB hit/miss/kill-switch, coalescing), search |
-| `:opra-data` Kotlin unit | **27** | Robolectric + in-memory Room | OPRA JSONL parser (join/orphan/malformed, headphone display-name guard), filter-type→engine mapping, Room store, repository (NoChange/force/Updated/Failed + checksum-mismatch/offline cache-retention), bundled sha256 source + gz-fallback |
-| `:app` Kotlin unit | **23** | Robolectric + JUnit | Graphic-EQ freqz (BiquadResponse), SpectrumAnalyzer FFT/log-band guards, T2-OS approximation fit (AutoEqApprox), OpraEngineAdapter, SettingsStore provider/playback-snapshot migration, OpraSourcePolicy (release≠GitHub) |
-| `:app` instrumented | (on-device) | 3 devices (S25 / PD20 / SP4000T) | End-to-end audio path, rotation, offline DB |
+| `:autoeq-data` Kotlin unit | **102** | Robolectric + OkHttp interceptor + in-memory Room | Parsers, caches, DB-first repo (catalog seed, tombstone sweep, profile DB hit/miss/kill-switch, coalescing), schema-open migration, ETag 304 no-op, malformed index preservation, stored-filter/parser parity, 300+ delta full-resync fallback |
+| `:opra-data` Kotlin unit | **29** | Robolectric + in-memory Room | OPRA JSONL parser (join/orphan/malformed, headphone display-name guard), filter-type→engine mapping, Room store, repository (NoChange/force/Updated/Failed + checksum-mismatch/offline cache-retention), bundled sha256 source + gz-fallback |
+| `:app` Kotlin unit | **44** | Robolectric + JUnit | Graphic-EQ freqz (BiquadResponse), SpectrumAnalyzer FFT/log-band guards, T2-OS approximation fit (AutoEqApprox), OpraEngineAdapter, SettingsStore provider/playback-snapshot migration, OpraSourcePolicy (release≠GitHub), route/provider restore guards, playback snapshot, DeviceKey route policy |
+| `:app` instrumented | **13** | On-device, latest run `SM-S931N - 16` | End-to-end launch, tab entry, `ActivityScenario.recreate()` rotation smoke, legacy 3-device manual audio checks remain historical |
 | Native — `AuralTuneEQEngineTest` | 8 | host g++ | Engine: NaN guard, sample-rate change, validation, snapshot publish, xrun, enable toggle, rapid switching click-free |
 | Native — `RangeValidationTest` | 8 | host g++ | Native-side range bounds, `process()` size validation, applied-snapshot consistency |
 | Native — `GoldenResponseTest` | 3 fs | host g++ | `freqz` parity to **0.0000 dB** worst-case at 48k / 44.1k / 96k |
@@ -383,7 +399,7 @@ CMake links with `-Wl,-z,max-page-size=16384` and `-Wl,-z,common-page-size=16384
 On first launch:
 
 1. **Local music playback** — pick an audio file via SAF (`ACTION_OPEN_DOCUMENT`); it plays through ExoPlayer with the AutoEQ + graphic-EQ engine inline. (A debug build adds a MediaStore "play first track" shortcut.)
-2. **Offline catalog** — the bundled `assets/autoeq/INDEX.md` seed is imported into Room on first run, so the 5,000+ entry catalog is searchable with **zero network**; a background ETag-conditional refresh updates it only when upstream changed.
+2. **Offline catalog + profiles** — the bundled `assets/databases/autoeq_seed.db` opens via Room `createFromAsset`, so catalog search and first profile apply work with **zero network**; delta sync refreshes changed upstream entries without rebuilding the full seed.
 3. **Fuzzy search** — "airpod pro" → "Apple AirPods Pro", with diacritic / case / token-order tolerance.
 4. **Profile fetch (DB-first)** — tapping a result returns the DB-stored profile if present, else downloads `ParametricEQ.txt`, parses, stores parsed filters in Room, and pushes to the engine. Re-loads offline thereafter.
 5. **Graphic EQ (20-band)** — top response-curve graph (Kotlin freqz, composite of Manual + AutoEQ) + 20 vertical sliders driving the engine's Manual chain; named presets save/load (DataStore), current gains auto-restore.

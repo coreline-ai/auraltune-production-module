@@ -20,7 +20,6 @@
     <string name="player_prev">이전 곡</string>
     <string name="player_next">다음 곡</string>
     <string name="player_add_files">파일 추가</string>
-    <string name="player_clear_queue">목록 비우기</string>
     <string name="player_remove">목록에서 제거</string>
     <string name="player_queue_empty">‘파일 추가’로 음악을 담아보세요</string>
     <string name="player_queue_title">재생목록 (%1$d)</string>
@@ -60,6 +59,8 @@
     <string name="profile_update_checking">프로파일 업데이트 확인 중…</string>
     <string name="profile_update_no_change">프로파일이 최신 상태입니다</string>
     <string name="profile_update_updated_format">프로파일 업데이트됨 (변경 %1$d, 제거 %2$d)</string>
+    <string name="profile_update_full_resync_completed_format">대규모 변경(%1$d개)으로 전체 카탈로그를 재동기화했습니다. 카탈로그 %2$d개를 반영했고 프로파일 %3$d개는 필요 시 다시 다운로드됩니다.</string>
+    <string name="profile_update_full_resync_required_format">변경 파일이 %1$d개 이상이라 증분 업데이트를 중단했습니다. 현재 프로파일은 유지되며, 전체 재동기화를 다시 시도해야 합니다.</string>
     <string name="profile_update_failed_format">업데이트 확인 실패: %1$s</string>
 
     <!-- Status card -->

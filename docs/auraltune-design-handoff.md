@@ -13,7 +13,7 @@
 
 > **이 문서 하나로 UI 전체를 재현할 수 있도록** 작성된 디자인 사양서입니다.
 > 1부는 **현재 구현 사양**(코드 전수 감사 기반, redline 포함), 2부는 **개선 제안 / 열린 질문**입니다.
-> 모든 사양은 소스 코드(`663b2f9`, main)에서 직접 추출·검증했습니다.
+> 모든 사양은 소스 코드(`c803fde`, main)와 2026-06-26 현재 작업트리 패치를 기준으로 직접 추출·검증했습니다.
 
 | 항목 | 값 |
 |---|---|
@@ -27,7 +27,7 @@
 | RTL | `supportsRtl=true` |
 | 백업 | 전면 비활성(allowBackup=false + data_extraction_rules 전 도메인 제외) |
 | 네트워크 | HTTPS 전용(cleartext 금지, GitHub raw) |
-| 앱 아이콘 | ⚠️ **없음** — 안드로이드 기본 아이콘(`sym_def_app_icon`) 사용 중. adaptive-icon 세트 신규 제작 필요 |
+| 앱 아이콘 | Adaptive icon 적용 완료. XML은 `@drawable/ic_launcher_background`, `foreground`, `monochrome`를 참조하며 density PNG fallback은 mdpi 48 / hdpi 72 / xhdpi 96 / xxhdpi 144 / xxxhdpi 192 규격. |
 | 작성일 | 2026-06-25 |
 
 AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가 헤드폰 모델을 고르면 측정 기반 보정 프로파일(AutoEQ 또는 OPRA)을 자동 적용하고, 20밴드 그래픽 EQ로 직접 조정하며, 원음/보정/내설정 3단 비교(A/B/C)로 즉시 청취 비교합니다. 자체 NDK C++ DSP 엔진이 앱 내 플레이어 소리를 실시간 보정합니다.
@@ -78,7 +78,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 | 2 | AUTOEQ | `Icons.Default.GraphicEq` | `AutoEQ` (`tab_autoeq`) | |
 | 3 | OPRA | `Icons.Default.Tune` | `OPRA` (`tab_opra`) | |
 
-> ⚠️ 3개 아이콘 모두 `contentDescription=null` (접근성 갭).
+> ✅ 3개 아이콘 모두 탭 라벨과 동일한 `contentDescription`을 가진다.
 > ✅ **활성 소스 배지** — 현재 적용 중인 보정 소스 탭(AutoEQ/OPRA) 아이콘에 점 배지(`BadgedBox`+`Badge`). 어느 소스가 실제로 도는지 탭에서 바로 보임(§9.1).
 
 ### 1.3 핵심 IA 규칙
@@ -242,9 +242,9 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 │ │ [AutoEQ] 보정프로파일명 ←보정시│  │          │   슬라이더 0·비활성           │
 │ │ ──●────────────  3:07 / 4:07 │  │          │   ⏮(비활성) ⏯(비활성) ⏭(비활성)│
 │ │      ⏮    (⏯ 64dp)    ⏭     │  │          ├─────────────────────────────┤
-│ ╰─────────────────────────────╯  │          │ [+ 파일 추가] [목록 비우기(비활성)]│
-│ [+ 파일 추가]  [ 목록 비우기 ]    │          ├─────────────────────────────┤
-│ 재생목록 (3)                      │          │   (큐 영역)                   │
+│ ╰─────────────────────────────╯  │          │ 재생목록 (0)              [+] │
+│ 재생목록 (3)                 [+] │          ├─────────────────────────────┤
+│                                   │          │   (큐 영역)                   │
 │  ▶ 1. track-a.wav            ✕   │          │  "'파일 추가'로 음악을 담아보세요"│
 │    2. track-b.flac           ✕   │          └─────────────────────────────┘
 │    3. track-c.mp3            ✕   │
@@ -258,10 +258,10 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 - Spacer 8dp + 가운데 정렬 트랜스포트 Row: `SkipPrevious` IconButton + Spacer16 + **`PlayArrow`/`Pause` FilledIconButton 64dp** + Spacer16 + `SkipNext` IconButton. **미디어 없으면 전부 비활성**.
 - ⚠️ 시간 포맷 = `mm:ss`, **분 앞 0 없음**(예 `3:07`, `0:05`, 음수→`0:00`).
 
-**② 파일 액션 Row** (간격 8dp)
-- `Button` 「파일 추가」(weight 1, `Add` 아이콘 + `player_add_files`) → SAF `OpenMultipleDocuments(audio/*)` 다중선택 → `addToQueue`(첫 추가 시 자동 재생). 선택기 없으면 Toast `saf_unavailable`(LONG).
-- `OutlinedButton` 「목록 비우기」(weight 1, `player_clear_queue`, **enabled=hasMedia**) → `clearQueue`.
-- (DEBUG 빌드만) `OutlinedButton` 「첫곡」 — MediaStore 첫 트랙 추가. **릴리스에는 없음**.
+**② 재생목록 헤더**
+- 헤더 Row: 좌측 `재생목록 (N)` `titleSmall`, 우측 40dp 사각 아이콘 버튼 `Add`(`player_add_files`).
+- `Add` 아이콘 버튼 → SAF `OpenMultipleDocuments(audio/*)` 다중선택 → `addToQueue`(첫 추가 시 자동 재생). 선택기 없으면 Toast `saf_unavailable`(LONG).
+- 목록 비우기/첫곡 버튼은 현재 플레이어 UI에서 제거한다. 큐 관리는 개별 행의 제거 버튼과 파일 추가 흐름으로 제한한다.
 
 **③ 큐**
 - 비어있으면 `EmptyStateMessage(player_queue_empty)`.
@@ -411,7 +411,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 ## 6. 그래픽 EQ 심화 (GraphicEqCard + EqGraphView)
 
 ### 6.1 GraphicEqCard 구조 (기본 Card, 내부 16dp) — 위→아래
-1. **제목 Row**: `그래픽 EQ (20밴드)`(**하드코딩**, i18n TODO) `titleMedium`(weight1) + `TextButton` 「리셋」.
+1. **제목 Row**: `graphic_eq_title` 리소스(`그래픽 EQ (20밴드)`) `titleMedium`(weight1) + `TextButton` `graphic_eq_reset`(`리셋`).
 2. **게인 한계 Row**: 라벨 `한계` `labelLarge` + Spacer8 + 각 옵션마다 `FilterChip` `±N`(간격6dp). 선택칩 = `gainLimitDb`에 가장 가까운 값(항상 정확히 하나 선택, nearest-snap).
    - 옵션 = **6 / 12 / 15 / 20 dB** (기본 **12**). 20은 저장 한계이기도 함.
 3. **프리셋 Row**: `OutlinedButton` 「프리셋 저장」 + Spacer8 + Box[`TextButton`(선택명 또는 `프리셋 불러오기 (N)`) → DropdownMenu].
@@ -477,7 +477,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 | player_no_media | 재생할 파일이 없습니다 |
 | player_play / player_pause | 재생 / 일시정지 |
 | player_prev / player_next | 이전 곡 / 다음 곡 |
-| player_add_files / player_clear_queue | 파일 추가 / 목록 비우기 |
+| player_add_files | 파일 추가 |
 | player_remove | 목록에서 제거 |
 | player_queue_empty | ‘파일 추가’로 음악을 담아보세요 |
 | player_queue_title | 재생목록 (%1$d) |
@@ -540,11 +540,11 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 
 > ⚠️ AutoEq(MIT)·OPRA(CC BY-SA 4.0) 출처·변경(opra_changes_notice)·비보증(opra_no_endorsement)·권리비제한(opra_license_not_restricted) 문구는 **법적 필수 — 위 텍스트 그대로** About 카드/OPRA 상세에 노출.
 
-### 8.2 하드코딩 Kotlin 문자열 (리소스 아님, i18n 미적용)
-내비 `AutoEQ`·`OPRA` / TopBar `· AutoEQ`·`· OPRA` / OPRA 검색 `OPRA 헤드폰 검색…` / OPRA 갱신 `OPRA 데이터 갱신`·`OPRA 갱신 중…` / OPRA 빈상태 2종 / `프로파일 업데이트 확인` / 빠른선택 `프로파일 빠른 선택 ▾`·`프로파일: <명>` / 디버그 `첫곡` / `• 적용 불가` / 진단 `AutoEQ active filters`·`Applied generation` / 그래픽EQ `그래픽 EQ (20밴드)`·`리셋`·`한계`·`±N`·`프리셋 저장`·`프리셋 불러오기 (N)`·`저장된 프리셋 없음`·`삭제`·`프리앰프 표시 (…)`·`이름`·`저장`·`취소` / 기본 프리셋명 `프리셋`.
+### 8.2 리소스화 현황
+내비, TopBar, AutoEQ/OPRA 검색, OPRA 갱신, 프로파일 업데이트, 빠른선택, 진단, 그래픽 EQ 주요 버튼/라벨, 플레이어 오류 메시지는 `strings.xml` 기준으로 리소스화됐다. `AutoEQ`, `OPRA`, `CC BY-SA 4.0`, `Roon Labs` 같은 고유명과 라이선스 명칭은 의도적으로 영문 표기를 유지한다.
 
 ### 8.3 동적 스낵바/토스트 (1회성 채널 `importMessage`)
-혼합 언어. `Imported "X"` · `Import failed: <reason>` · `Cache cleared` · `OPRA: 최신 상태` · `OPRA 갱신됨 (제품 N, 프로파일 M)` · `OPRA 갱신 실패: <reason>` · `OPRA 프로파일을 찾을 수 없습니다` · `이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)` · `원음 모드 — 업데이트를 건너뜁니다` · `프로파일 업데이트 확인 중…` · `프로파일이 최신 상태입니다` · `프로파일 업데이트됨 (변경 X, 제거 Y)` · `업데이트 확인 실패: <reason>`. (Material3 기본 스낵바, 액션 없음, short. 표시 후 ACK)
+주요 사용자 노출 메시지는 한국어 리소스로 정리됐다. OPRA/AutoEQ 고유명, 에러 코드, 라이선스명은 원문을 유지한다. (Material3 기본 스낵바, 액션 없음, short. 표시 후 ACK)
 
 ### 8.4 레거시/미사용 문자열 (현재 UI에 안 나옴)
 `correction_toggle`("AutoEQ correction"), `kill_switch_label`, `kill_switch_hint` — 비교모드 바로 흡수됨. 새 디자인에서 노출 금지.
@@ -597,7 +597,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 |------|------|
 | `INTERNET`, `ACCESS_NETWORK_STATE` | 카탈로그/프로파일 HTTPS fetch, 오프라인 감지 |
 | `MODIFY_AUDIO_SETTINGS` | 오디오 라우팅 (설치시 권한) |
-| `BLUETOOTH_CONNECT` (minSdk31) | 기기 식별 기반 AutoEQ. **Android 12+ 런타임 권한** → 권한 사유/요청 UI 디자인 필요(현재 미설계) |
+| `BLUETOOTH_CONNECT` (minSdk31) | 기기 식별 기반 AutoEQ. **Android 12+ 런타임 권한** 사유 카드와 허용/나중에 버튼은 구현됨. 남은 범위는 거부·영구거부 후 재안내 문구와 라우트별 수동 QA 증적. |
 | 미디어 권한 | **릴리스: SAF(OpenDocument)만**, 미디어 권한 없음. `READ_MEDIA_AUDIO`/`READ_EXTERNAL_STORAGE`는 **DEBUG 빌드 전용** |
 | 네트워크 | HTTPS 전용, cleartext 금지, 시스템 신뢰앵커만 (GitHub raw) |
 | 백업/전송 | 전면 비활성 (사용자 EQ/기기 데이터 단말 밖 유출 안 함) |
@@ -607,7 +607,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 
 ## 11. 디버그 전용 / 비출하 (릴리스 목업에 넣지 말 것)
 
-- **「첫곡」 버튼** (플레이어 파일액션) — MediaStore 첫 트랙.
+- **첫곡 자동 선택 helper** (`DebugSupport.firstPlayableUri`) — debug 구현은 남아 있으나 현재 플레이어 UI 버튼은 제거됨.
 - **AudioFxProbeCard** (보정화면, DiagnosticsCard 이후) — 이펙트 세션 브로드캐스트 커버리지 측정 카드.
 - **EqState Logcat** — 진단 폴링 시 디버그 로그.
 - **OS-effect 근사 백엔드 전체**(`ExternalAudioFxController`/`OsEffectBackend`/`AutoEqApprox`) — **동면 상태**(코드·테스트 존재, 프로덕션 UI에서 한 번도 호출 안 됨). **외부앱/OS 이퀄라이저 근사 화면을 출하 UI인 것처럼 디자인하지 말 것.**
@@ -621,14 +621,14 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 
 ## 0. 목업 시작 전 결정 사항 (deliverable 전제)
 
-- **렌더 로케일** — 현재 앱은 한/영 혼재(1부 §8). 목업 산출 시 택일 필요. **권장: ① 현 상태(혼재) 1세트로 사실 기록 → ② 목표 단일 로케일(한국어 우선, 영어 폴백) 1세트로 제안.** 어느 쪽이든 placing 전 확정.
+- **렌더 로케일** — 주요 UI/스낵바는 한국어 리소스로 정리됨. OPRA, CC BY-SA, URL, 제조사명 같은 법적/고유 명칭은 영문 유지. 목업 산출 시 `한국어 우선 + 법적 고유명 영문 유지` 기준으로 통일.
 - **신규 설계가 필요한 "출하 필수" 화면(코드에 아직 없음)**:
-  - **BLUETOOTH_CONNECT 런타임 권한 플로우**(Android 12+) — 사유 다이얼로그 / 요청 / 거부·영구거부 상태. 기기 식별 기반 AutoEQ가 의존하나 **현재 UI 전무**(권한은 매니페스트에만 선언). 식별된 기기를 사용자에게 보여줄지(현재는 Diagnostics 카드의 device hash뿐)도 결정.
+  - **BLUETOOTH_CONNECT 런타임 권한 플로우**(Android 12+) — 플레이어 화면에 사유 카드와 허용/나중에 버튼은 구현됨. 거부·영구거부 후 재안내 UX와 라우트별 수동 QA 증적은 후속.
   - **EqGraphView 범례·축 눈금**(§6.2) — 캔버스에 없음, 배치·공간 신규 설계.
-  - **앱 아이콘 세트**(§D12) — adaptive-icon 전 밀도.
+  - **앱 아이콘 세트**(§D12) — 구현 완료. 후속은 Play Store 고해상도 아이콘/피처 그래픽 산출물.
 
 ## A. 일관성 (1순위)
-1. **언어 혼재 해소** — 플레이어·비교모드·내비는 한국어, 검색·상태·진단·About·OPRA는 영어. 게다가 **하드코딩 문자열·동적 스낵바가 리소스 밖**이라 i18n 불가 상태. 단일 로케일 확정 또는 ko/en 리소스 분리 + 하드코딩 문자열 전부 리소스화 필요.
+1. **언어 혼재 해소** — 주요 UI와 스낵바는 한국어 리소스로 정리됨. 남은 범위는 법적 고유명/라이선스 영문 유지 정책, ko/en 다국어 분리 여부 결정.
 2. **카피 톤** — 진단/About의 개발자향 영어를 사용자 친화 문구로.
 
 ## B. 플레이어
@@ -642,13 +642,13 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 8. **그래픽 EQ 가독성** — 20개 페이더 터치타깃, EqGraphView **범례·축 눈금 디자이너가 추가**(§6.2).
 9. **OPRA 상세 → 바텀시트** — 현재 AlertDialog.
 10. **두 탭 통합 검토** — 공유 보정영역이 동일하고 슬롯도 공유. "소스 토글 + 단일 보정화면"으로 IA 단순화 가능(검색 블록만 분기). (가장 큰 IA 결정)
-11. **접이식 카드 chevron 접근성** — cd null → 라벨 부여.
+11. **접이식 카드 chevron 접근성** — 주요 접이식/버튼 contentDescription은 코드 기준 점검 완료. 디자인 QA에서는 TalkBack 실제 낭독 흐름만 후속 확인.
 
 ## D. 시스템/브랜딩
-12. **앱 아이콘 신규 제작** — 현재 안드로이드 기본. adaptive-icon(foreground/background/monochrome 전밀도) 필수 산출물.
+12. **스토어 그래픽 산출물** — 앱 실행 아이콘은 구현 완료. Play Store용 512px 아이콘, feature graphic, 스크린샷 세트는 별도 산출 필요.
 13. **다크/라이트 + Dynamic Color** — 현재 OS 추종, Material You 의도적 off. 채택 여부 결정.
 14. **타입스케일/셰이프 토큰** — 현재 M3 기본. 브랜드 타입/코너 정의 시 전부 신규.
-15. **BLUETOOTH_CONNECT 런타임 권한 UI** — 사유/요청 화면 미설계.
+15. **BLUETOOTH_CONNECT 런타임 권한 UI** — 사유/요청 기본 화면은 구현됨. 후속은 거부·영구거부 후 재안내 UX와 실제 Bluetooth 라우트 QA.
 
 ## E. 열린 질문 (디자이너 결정)
 - AutoEQ·OPRA **탭 분리 vs 단일화면+소스토글**? (→ C10)
