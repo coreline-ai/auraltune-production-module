@@ -194,9 +194,7 @@ if ($RunConnectedTests) {
 }
 
 Write-Step "Manual release gates still required"
-Write-Host "- OPRA EULA / OSS notice / store copy legal approval"
-Write-Host "- Physical route QA evidence: wired, Bluetooth, USB, speaker, HDMI"
-Write-Host "- GitHub Actions hosted run after push or PR"
+Write-Host "- Physical device smoke: confirm correction applies on every output route (no route-based clear)"
 Write-Host "- Final commit/release tag after review"
 
 Write-Host ""

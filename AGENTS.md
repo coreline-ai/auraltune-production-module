@@ -134,14 +134,15 @@ g++ -std=c++17 -O2 -fno-finite-math-only -I audio-engine/src/main/cpp/core \
     -o /tmp/t && /tmp/t
 ```
 > loudness 소스 3개는 필수다(`AuralTuneEQEngine`가 `LoudnessCompensator`/`IsoContours`/
-> `LoudnessEqualizer` 심볼을 참조). 빠지면 링크 에러. CI(`ci/android.yml`)는 이미 반영됨.
+> `LoudnessEqualizer` 심볼을 참조). 빠지면 링크 에러. (호스트 네이티브 테스트 빌드 시 직접 포함할 것.)
 
 ### 16KB 페이지 검증
 ```bash
 llvm-readelf -l <.../arm64-v8a/libauraltune_audio.so> | awk '/LOAD/{print $NF}'   # 0x4000
 ```
 
-CI는 `ci/android.yml`(push/PR to `main`에서 단위 + 네이티브 + R8 + 16KB 검증).
+CI 없음 — 이 저장소는 순수 코드 저장소이며 모든 검증은 개발 중 로컬에서 수행한다.
+릴리스 전 로컬 게이트: `.\tools\release_readiness.ps1`(단위 + R8 + 디버그마커 스캔 + 16KB 정렬).
 
 ---
 

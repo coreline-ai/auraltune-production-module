@@ -87,6 +87,10 @@ public:
     // linear wet/dry crossfade over this many seconds (not an abrupt snap).
     static constexpr float kAutoEqRampSeconds = 0.5f;
 
+    // AutoEQ preamp smoothing: short enough to feel immediate, long enough to
+    // remove clicks/zippers from direct gain changes.
+    static constexpr float kAutoEqPreampRampSeconds = 0.03f;
+
     // Retire grace — minimum lifetime of a published snapshot after a newer
     // one has taken over. 500 ms is comfortably larger than any audio
     // callback (typical 5-20 ms, worst-case ~100 ms) and matches the Swift
@@ -284,6 +288,9 @@ private:
         // Linear preamp gain (already converted from dB).
         float autoEqPreampLinear = 1.0f;
 
+        // Frames used to glide direct preamp gain changes.
+        int autoEqPreampRampFrames = 1440; // 30 ms at 48 kHz.
+
         // Per-sample (per-frame) increment for the AutoEQ enable/disable mix
         // ramp = 1 / (kAutoEqRampSeconds * sampleRate). Depends only on the rate,
         // so it is set in the constructor + recomputed on sample-rate change and
@@ -340,6 +347,7 @@ private:
 
     // Per-sample mix-ramp increment for the AutoEQ enable/disable crossfade.
     static float computeAutoEqMixStep(double rate);
+    static int computeAutoEqPreampRampFrames(double rate);
 
     // Apply the AutoEQ stage (preamp gain + biquad cascade) in place. Audio
     // thread only — reads the snapshot, mutates [autoEqChain_] delay state.
@@ -445,6 +453,14 @@ private:
     // genuine enable/disable transitions DURING playback are crossfaded.
     bool autoEqMixInit_ = false;
     std::vector<float> autoEqDryScratch_;  // audio thread only
+
+    // AutoEQ preamp gain glide state, audio thread only. First callback snaps
+    // to the target; later target changes ramp over kAutoEqPreampRampSeconds.
+    float autoEqPreampCurrent_ = 1.0f;
+    float autoEqPreampTarget_ = 1.0f;
+    float autoEqPreampStep_ = 0.0f;
+    int autoEqPreampFramesRemaining_ = 0;
+    bool autoEqPreampInit_ = false;
 
     // ---- Diagnostics counters (relaxed atomic) ----
     std::atomic<int64_t> diagXrun_{0};

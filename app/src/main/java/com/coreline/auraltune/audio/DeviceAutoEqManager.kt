@@ -51,11 +51,13 @@ import java.io.Closeable
  *     with the current active route.
  *   - [stop] / [close] unhooks and joins outstanding work.
  *
- * Phase 5 invariants:
- *   - Speaker / HDMI / telephony routes are auto-skipped (DeviceKey returns
- *     supportsAutoEq=false). Engine receives clearAutoEq() in those cases.
- *   - Saved selection for an unknown device key persists silently — when the
- *     device returns, the saved profile is reapplied.
+ * Invariants:
+ *   - Correction is applied on EVERY output route (speaker / HDMI / line / BT /
+ *     USB / wired). Route type is NOT a gate — the engine always outputs per the
+ *     active profile; matching headphones to the profile is the user's choice.
+ *   - Saved selection for a device key persists silently — when the device
+ *     returns, the saved profile is reapplied; routes with no remembered choice
+ *     fall back to the global selection.
  *   - PII redaction: only DeviceKey.stableHash() may leave the device.
  */
 class DeviceAutoEqManager(
@@ -153,24 +155,21 @@ class DeviceAutoEqManager(
     suspend fun selectProfileForCurrentDevice(entry: AutoEqCatalogEntry): Boolean {
         val key = lastKey
         if (BuildConfig.DEBUG) {
-            Log.i(TAG, "selectProfile: '${entry.name}' key=${key?.displayName} eligible=${key?.supportsAutoEq}")
+            Log.i(TAG, "selectProfile: '${entry.name}' key=${key?.displayName}")
         }
         // Always persist the global "selectedProfileId" so post-restart restore works
         // even when no device is currently routed.
         settings.setSelectedProfileId(entry.id)
-        if (key?.supportsAutoEq != true) {
-            // Host-adapter contract: selecting a profile in the UI must not
-            // make speaker / HDMI / line-out routes receive headphone correction.
-            // Persist the global choice for the next eligible headphone route,
-            // but keep the current non-headphone route in passthrough.
-            engine.clearAutoEq()
-            return false
+        // Route is not a gate: the active profile is applied on every output route
+        // (the user matches their headphones to the profile). When a device key is
+        // known, remember the per-device selection so it auto-restores on reconnect.
+        if (key != null) {
+            settings.setSelectionForDevice(
+                key.raw,
+                AutoEqSelection(profileId = entry.id, isEnabled = true),
+            )
         }
-        settings.setSelectionForDevice(
-            key.raw,
-            AutoEqSelection(profileId = entry.id, isEnabled = true),
-        )
-        return applyProfile(entry, expectedDeviceRaw = key.raw)
+        return applyProfile(entry, expectedDeviceRaw = key?.raw)
     }
 
     suspend fun clearProfileForCurrentDevice() {
@@ -189,11 +188,9 @@ class DeviceAutoEqManager(
     ): Boolean {
         val profile = api.resolve(entry) ?: return false
         currentCoroutineContext().ensureActive()
-        if (expectedDeviceRaw != null) {
-            val current = lastKey
-            if (current?.raw != expectedDeviceRaw || !current.supportsAutoEq) {
-                return false
-            }
+        if (expectedDeviceRaw != null && lastKey?.raw != expectedDeviceRaw) {
+            // Route changed mid-resolve — abandon; the new route runs its own resolve.
+            return false
         }
         val validated = profile.validated()
         if (validated.filters.isEmpty()) return false
@@ -202,15 +199,11 @@ class DeviceAutoEqManager(
     }
 
     /**
-     * Provider-agnostic guarded engine apply. Used by OPRA and "use current selection" paths.
-     * The current route must be headphone-eligible; otherwise stale correction is cleared and
-     * the caller keeps provider state unchanged.
+     * Provider-agnostic engine apply. Used by OPRA and "use current selection" paths.
+     * Applies on any output route; returns false only when the profile has no usable
+     * filters (a genuinely bad profile), in which case the engine is left cleared.
      */
     fun applyResolvedProfile(profile: AutoEqProfile): Boolean {
-        if (lastKey?.supportsAutoEq != true) {
-            engine.clearAutoEq()
-            return false
-        }
         val validated = profile.validated()
         if (validated.filters.isEmpty()) {
             engine.clearAutoEq()
@@ -261,10 +254,11 @@ class DeviceAutoEqManager(
      *
      * Steps:
      *   1. Pick the highest-priority output device.
-     *   2. Build its DeviceKey (or skip if not eligible).
+     *   2. Build its DeviceKey (every route maps to a key).
      *   3. Keep engine sample rate locked to the actual AudioTrack PCM rate.
-     *   4. If device key changed, look up saved selection for this device and
-     *      either resolve+apply or clearAutoEq.
+     *   4. If device key changed, look up the saved selection for this device
+     *      (falling back to the global selection) and reapply it. Correction is
+     *      cleared only when no profile is selected at all — never by route type.
      */
     private fun reconcile() {
         val devices = try {
@@ -279,13 +273,6 @@ class DeviceAutoEqManager(
         }
         val btAvail = hasBluetoothConnect()
         val key = DeviceKey.fromAudioDevice(chosen, btAddressAvailable = btAvail)
-            ?: run {
-                lastKey = null
-                currentDeviceHash = null
-                resolveJob?.cancel()
-                engine.clearAutoEq()
-                return
-            }
 
         // (a) Sample-rate update — DELIBERATELY DISABLED for MVP (P0-2).
         //
@@ -302,20 +289,14 @@ class DeviceAutoEqManager(
         // playback path owns it (the AudioProcessor reconfigures the engine to
         // the decoded stream rate, e.g. 44100/48000).
 
-        // (b) Device-key change → reapply / clear profile.
+        // (b) Device-key change → reapply the profile for the new route
+        // (correction is NEVER cleared because of the route type).
         if (lastKey?.raw != key.raw) {
             lastKey = key
             currentDeviceHash = key.stableHash()
             if (BuildConfig.DEBUG) {
                 // displayName can be a BT/USB product name (user-identifiable) — debug-only.
-                Log.i(TAG, "route → ${key.displayName} (eligible=${key.supportsAutoEq}, " +
-                    "hash=${key.stableHash()})")
-            }
-
-            if (!key.supportsAutoEq) {
-                resolveJob?.cancel()
-                engine.clearAutoEq()
-                return
+                Log.i(TAG, "route → ${key.displayName} (hash=${key.stableHash()})")
             }
 
             // Resolve saved selection for this device. Cancel any in-flight resolve.
@@ -399,11 +380,9 @@ class DeviceAutoEqManager(
             AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
             if (Build.VERSION.SDK_INT >= 31) AudioDeviceInfo.TYPE_BLE_HEADSET else -1,
-            // Non-headphone output routes are deliberately included after all
-            // headphone-class routes. That lets DeviceKey mark them
-            // supportsAutoEq=false and forces engine.clearAutoEq(), instead of
-            // returning null and accidentally leaving the previous headphone
-            // correction active on HDMI / line-out / speaker.
+            // Non-headphone routes come after headphone-class routes so that when
+            // both are present the headphone route wins as the "current" device.
+            // Correction still applies on every route — none of these are skipped.
             AudioDeviceInfo.TYPE_HDMI,
             AudioDeviceInfo.TYPE_HDMI_ARC,
             AudioDeviceInfo.TYPE_HDMI_EARC,

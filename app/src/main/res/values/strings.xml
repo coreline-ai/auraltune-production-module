@@ -152,8 +152,10 @@
     <string name="filter_type_high_shelf">하이 셸프</string>
     <string name="filter_type_high_pass">하이패스</string>
 
-    <!-- Attribution (Phase 7 release task) -->
+    <!-- AutoEq attribution & license (MIT — commercial use permitted, kept separate from OPRA) -->
     <string name="autoeq_attribution">헤드폰 보정 프로파일 제공: Jaakko Pasanen의 AutoEq 프로젝트 (MIT License)</string>
+    <string name="autoeq_project_link_label">AutoEq project on GitHub</string>
+    <string name="autoeq_license_link_label">View MIT license</string>
 
     <!-- About / 정보 (Phase 5: license & attribution) -->
     <string name="about_title">정보 및 라이선스</string>
@@ -184,7 +186,7 @@
     <string name="opra_sync_failed_format">OPRA 갱신 실패: %1$s</string>
     <string name="opra_profile_not_found">OPRA 프로파일을 찾을 수 없습니다</string>
     <string name="opra_profile_unsupported">이 OPRA 프로파일은 적용 불가 (미지원 필터 또는 밴드 10개 초과)</string>
-    <string name="profile_apply_ineligible_route">현재 출력 장치에서는 헤드폰 보정을 적용하지 않습니다</string>
+    <string name="profile_apply_failed">프로파일을 적용하지 못했습니다</string>
     <string name="opra_profile_picker_title">OPRA 프로파일 선택</string>
     <string name="opra_profile_picker_placeholder">최근 OPRA 프로파일에서 선택</string>
     <string name="opra_empty_loading">OPRA 데이터를 불러오는 중…</string>
@@ -201,6 +203,6 @@
     <string name="opra_detail_close">Close</string>
     <!-- EQ-detail footnote: indicate changes (format conversion) + no-endorsement, per CC BY-SA 4.0. -->
     <string name="opra_detail_notice">OPRA-derived: format-converted for playback, original values preserved. Not affiliated with OPRA / Roon Labs.</string>
-    <string name="opra_restore_ineligible_route">저장된 OPRA 프로파일은 유지했지만 현재 출력 장치에는 적용하지 않았습니다</string>
+    <string name="opra_restore_failed">저장된 OPRA 프로파일을 적용하지 못했습니다</string>
     <string name="opra_link_open_failed">링크를 열 수 있는 앱을 찾지 못했습니다</string>
 </resources>

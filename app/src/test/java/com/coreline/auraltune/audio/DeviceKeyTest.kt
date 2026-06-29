@@ -2,9 +2,7 @@ package com.coreline.auraltune.audio
 
 import android.media.AudioDeviceInfo
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -16,8 +14,8 @@ import org.robolectric.shadows.AudioDeviceInfoBuilder
 @Config(sdk = [34])
 class DeviceKeyTest {
     @Test
-    fun `headphone class routes support AutoEQ`() {
-        val eligibleTypes = listOf(
+    fun `headphone class routes map to a device key`() {
+        val headphoneTypes = listOf(
             AudioDeviceInfo.TYPE_USB_HEADSET,
             AudioDeviceInfo.TYPE_USB_DEVICE,
             AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
@@ -26,17 +24,17 @@ class DeviceKeyTest {
             AudioDeviceInfo.TYPE_WIRED_HEADSET,
         )
 
-        eligibleTypes.forEach { type ->
+        headphoneTypes.forEach { type ->
             val key = DeviceKey.fromAudioDevice(device(type), btAddressAvailable = false)
-
             assertNotNull("type $type should produce a key", key)
-            assertTrue("type $type should support AutoEQ", key!!.supportsAutoEq)
         }
     }
 
     @Test
-    fun `non headphone output routes force AutoEQ clear`() {
-        val ineligibleTypes = listOf(
+    fun `non headphone output routes still map to a key (correction applies on every route)`() {
+        // Route type is NOT a gate — speaker / HDMI / line / telephony still get a
+        // stable key so the active profile keeps being applied (no route clearing).
+        val nonHeadphoneTypes = listOf(
             AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
             AudioDeviceInfo.TYPE_HDMI,
             AudioDeviceInfo.TYPE_HDMI_ARC,
@@ -46,23 +44,22 @@ class DeviceKeyTest {
             AudioDeviceInfo.TYPE_TELEPHONY,
         )
 
-        ineligibleTypes.forEach { type ->
+        nonHeadphoneTypes.forEach { type ->
             val key = DeviceKey.fromAudioDevice(device(type), btAddressAvailable = true)
-
-            assertNotNull("type $type should produce a clear-sentinel key", key)
-            assertFalse("type $type should not support AutoEQ", key!!.supportsAutoEq)
+            assertNotNull("type $type should produce a key", key)
             assertTrue(key.raw.startsWith("non_headphone|"))
         }
     }
 
     @Test
-    fun `unknown routes do not create a device key`() {
+    fun `unknown routes still map to a generic key`() {
         val key = DeviceKey.fromAudioDevice(
             device(AudioDeviceInfo.TYPE_BUILTIN_MIC),
             btAddressAvailable = true,
         )
 
-        assertNull(key)
+        assertNotNull(key)
+        assertTrue(key.raw.startsWith("other|"))
     }
 
     @Test
@@ -72,9 +69,7 @@ class DeviceKeyTest {
             btAddressAvailable = false,
         )
 
-        assertNotNull(key)
-        assertEquals("bt|robolectric", key!!.raw)
-        assertTrue(key.supportsAutoEq)
+        assertEquals("bt|robolectric", key.raw)
     }
 
     private fun device(type: Int): AudioDeviceInfo =

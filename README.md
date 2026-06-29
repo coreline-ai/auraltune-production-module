@@ -158,12 +158,12 @@ Current release-candidate worktree includes the Phase 7 hardening pass:
 
 - Player errors are surfaced to the user and failed tracks are removed from the queue instead of silently looping.
 - The player audio processor accepts PCM 16-bit, 24-bit, 32-bit integer, and float decode outputs, then emits 16-bit PCM for Media3 sink compatibility.
-- AutoEQ/OPRA profile application is route-gated: speaker, HDMI, line, and telephony routes actively clear stale headphone correction.
-- OPRA restore/apply failure keeps the saved selection but does not show OPRA as currently applied when the output route is ineligible.
+- AutoEQ/OPRA profile application is kept route-independent: the selected correction remains applied across wired, Bluetooth, USB, speaker, HDMI, line, and other output routes.
+- OPRA restore/apply failure keeps the saved selection but does not show OPRA as currently applied when the selected profile itself cannot be applied.
 - OPRA search escapes SQL LIKE wildcards (`%`, `_`, `\`) so user queries are literal.
 - Adaptive launcher icon resources are tracked under `drawable/` with density PNG fallbacks.
 
-Repeat the local release gate on Windows:
+Repeat the local release verification on Windows:
 
 ```powershell
 .\tools\release_readiness.ps1
@@ -188,7 +188,7 @@ Equivalent manual commands used for the 2026-06-26 local verification:
 
 Validation snapshot: `246` unit tests PASS, release build PASS, APK debug-marker scan PASS, native LOAD alignment `0x4000` PASS.
 
-Active hosted workflow: [`.github/workflows/android.yml`](.github/workflows/android.yml). [`ci/android.yml`](ci/android.yml) is a pointer-only archive so there is one active CI source of truth.
+Verification is local-only. Run `.\tools\release_readiness.ps1` before committing a release build.
 
 ### Run native unit tests (host JVM)
 
@@ -204,7 +204,7 @@ g++ -std=c++17 -O2 -fno-finite-math-only \
     -o /tmp/run_native_tests && /tmp/run_native_tests
 ```
 
-Additional standalone native references live under [`audio-engine/src/test/cpp`](audio-engine/src/test/cpp). The Android release gate is tracked in the active hosted workflow above.
+Additional standalone native references live under [`audio-engine/src/test/cpp`](audio-engine/src/test/cpp). Run the local checks in `tools/release_readiness.ps1` before a release build.
 
 ### Verify 16 KB page-size compliance
 
@@ -289,7 +289,7 @@ repo.close()                              // cancels all inflight HTTP work
 | `:opra-data` Kotlin unit | **29** | Robolectric + in-memory Room | OPRA JSONL parser (join/orphan/malformed, headphone display-name guard), filter-type→engine mapping, Room store, repository (NoChange/force/Updated/Failed + checksum-mismatch/offline cache-retention), bundled sha256 source + gz-fallback |
 | `:app` Kotlin unit | **44** | Robolectric + JUnit | Graphic-EQ freqz (BiquadResponse), SpectrumAnalyzer FFT/log-band guards, T2-OS approximation fit (AutoEqApprox), OpraEngineAdapter, SettingsStore provider/playback-snapshot migration, OpraSourcePolicy (release≠GitHub), route/provider restore guards, playback snapshot, DeviceKey route policy |
 | `:app` instrumented | **13** | On-device, latest run `SM-S931N - 16` | End-to-end launch, tab entry, `ActivityScenario.recreate()` rotation smoke, legacy 3-device manual audio checks remain historical |
-| Native — `AuralTuneEQEngineTest` | 8 | host g++ | Engine: NaN guard, sample-rate change, validation, snapshot publish, xrun, enable toggle, rapid switching click-free |
+| Native — `AuralTuneEQEngineTest` | 11 | host g++ | Engine: NaN guard, sample-rate change, validation, snapshot publish, xrun, enable toggle, rapid switching click-free, preamp toggle glide |
 | Native — `RangeValidationTest` | 8 | host g++ | Native-side range bounds, `process()` size validation, applied-snapshot consistency |
 | Native — `GoldenResponseTest` | 3 fs | host g++ | `freqz` parity to **0.0000 dB** worst-case at 48k / 44.1k / 96k |
 | Native — `ScipyGoldenResponseTest` | – | host g++ | Cross-check with scipy frequency-domain ground truth |
@@ -359,7 +359,7 @@ The engine sample rate is driven by the playback path — `MusicPlayerController
 <details>
 <summary><b>8. NaN guard</b></summary>
 
-First-stereo-frame `!isfinite` check on the audio thread. Never disable `-fno-finite-math-only` (CI grep enforces).
+First-stereo-frame `!isfinite` check on the audio thread. Never disable `-fno-finite-math-only` (required for the NaN-guard correctness invariant).
 </details>
 
 <details>

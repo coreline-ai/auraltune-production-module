@@ -315,18 +315,19 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 
 #### ① StatusCard (실측: `AuralTunePanel`, profile 있을 때 elevated 6dp, 내부 16dp)
 ```
-활성 탭(현재 사용중):                    비활성 탭(선택만 기억):
+활성 탭(현재 사용중):                    비활성 탭(선택만 기억, 카드 탭으로 사용 전환):
 ╭──────────────────────────────╮      ╭──────────────────────────────╮
 │ (◉)  [AUTOEQ]              ✕ │      │ (◉)  [AUTOEQ]              ✕ │
 │  48dp  AKG K712 PRO          │      │  48dp  AKG K712 PRO          │
 │  원형   Rtings               │      │  원형   Rtings               │
-│ (● 현재 사용중)               │      │ [ 지금 사용 ]                 │
+│ (● 현재 사용중)               │      │  카드 탭 → 현재 사용          │
 ╰──────────────────────────────╯      ╰──────────────────────────────╯
                                        보정 없음 → No correction active (titleMedium)
 ```
 - 보정 시 Row: **48dp 원형 아이콘**(`GraphicEq`, 배경 `surfaceContainerLowest`, tint `secondaryContainer`) + Spacer14 + Column(weight1)[(sourceLabel 있으면)`SourceBadge`(이 탭 소스)+Spacer6 + 이름 `titleMedium` 2줄말줄임 + (measuredBy 비공백 시)`bodySmall`/onSurfaceVariant] + 우측 `Close`(탭별 클리어).
 - 없으면: `no_correction_active` `titleMedium`만.
-- **현재 사용중 / 지금 사용**(§9.1): 이 탭 선택이 활성이면 `● 현재 사용중` 칩(secondaryContainer 18% 채움+45% 보더, `labelLarge`, 라운드50), 비활성이면 `지금 사용` 버튼(`onUse`).
+- **현재 사용중 표시**: 이 탭 선택이 활성이면 `SourceBadge` 옆에 `● 현재 사용중` 칩(secondaryContainer 계열 채움+보더, `labelLarge`, 라운드50)을 표시한다.
+- **비활성 탭 사용 전환**: `지금 사용` 버튼은 두지 않고, 선택된 프로파일 카드 전체를 탭하면 해당 탭의 선택값이 현재 사용중으로 전환된다. 비활성 카드 배경은 기본 surface, 활성 카드는 `surfaceContainerHigh` + source accent border로 구분한다.
 
 #### ② ListenModeBar (containerColor=surface, 내부 16dp) — A/B/C 비교
 - 제목 `비교 모드`(`listen_mode_title`) `titleMedium` + Spacer8 + Row(간격8)[ModeButton×3 각 weight1] + Spacer6 + subtitle `bodySmall`/onSurfaceVariant.

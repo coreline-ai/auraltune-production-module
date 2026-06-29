@@ -13,6 +13,7 @@
 //   - pre-warp Nyquist guard unity replacement
 
 #include <cassert>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -342,6 +343,54 @@ void testRapidSwitchingClickFree() {
     std::printf("PASS testRapidSwitchingClickFree (clicks=%d)\n", clickEvents);
 }
 
+// Test 11: AutoEQ preamp toggle should glide independently of the AutoEQ
+// wet/dry switch. With no filters, a constant input directly reveals the
+// preamp gain, so an abrupt jump would be obvious in the first buffer.
+void testAutoEqPreampToggleGlides() {
+    constexpr int kShortFrames = 64;
+    constexpr int kSettleFrames = 2000;
+    const float halfGainDb = 20.0f * std::log10(0.5f);
+
+    AuralTuneEQEngine eng(48000.0);
+    eng.setAutoEqEnabled(true);
+    assert(eng.updateAutoEq(halfGainDb, false, 48000.0,
+                            nullptr, nullptr, nullptr, nullptr, 0) == 0);
+
+    std::vector<float> buf(kShortFrames * 2, 1.0f);
+    assert(eng.process(buf.data(), kShortFrames) == 0);
+    assert(std::fabs(buf[0] - 0.5f) < 1.0e-4f);
+
+    eng.setAutoEqPreampEnabled(false);
+    std::fill(buf.begin(), buf.end(), 1.0f);
+    assert(eng.process(buf.data(), kShortFrames) == 0);
+
+    const float offFirst = buf[0];
+    const float offLast = buf[(kShortFrames - 1) * 2];
+    assert(offFirst > 0.49f && offFirst < 0.51f);
+    assert(offLast > offFirst);
+    assert(offLast < 0.8f);
+
+    std::vector<float> settle(kSettleFrames * 2, 1.0f);
+    assert(eng.process(settle.data(), kSettleFrames) == 0);
+    assert(settle[(kSettleFrames - 1) * 2] > 0.999f);
+
+    eng.setAutoEqPreampEnabled(true);
+    std::fill(buf.begin(), buf.end(), 1.0f);
+    assert(eng.process(buf.data(), kShortFrames) == 0);
+
+    const float onFirst = buf[0];
+    const float onLast = buf[(kShortFrames - 1) * 2];
+    assert(onFirst > 0.999f);
+    assert(onLast < onFirst);
+    assert(onLast > 0.8f);
+
+    std::fill(settle.begin(), settle.end(), 1.0f);
+    assert(eng.process(settle.data(), kSettleFrames) == 0);
+    assert(std::fabs(settle[(kSettleFrames - 1) * 2] - 0.5f) < 1.0e-4f);
+
+    std::printf("PASS testAutoEqPreampToggleGlides\n");
+}
+
 int main() {
     testUnityBypass();
     testStaleFilterReset();
@@ -353,6 +402,7 @@ int main() {
     testXrunCounter();
     testEnableTogglePublishesSnapshot();
     testRapidSwitchingClickFree();
+    testAutoEqPreampToggleGlides();
     std::printf("\nAll native tests passed.\n");
     return 0;
 }

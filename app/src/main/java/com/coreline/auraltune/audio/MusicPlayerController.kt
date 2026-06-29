@@ -86,6 +86,15 @@ class MusicPlayerController(
     private var queue: List<TrackInfo> = emptyList()
     private var ticker: Job? = null
 
+    // Cold-start race guard. [restore] runs async and suspends on a DataStore read; until it
+    // completes the queue is empty and the player is STATE_IDLE, and restore() ends by forcing
+    // playWhenReady=false. A play tap landing in that window was otherwise swallowed — set on an
+    // empty IDLE player, then overwritten by restore — so the user had to press play twice
+    // (the "press play once, nothing happens; press again and it plays" bug, seen on slow cold
+    // starts). We record the intent here and let restore() honor it. Main-thread only.
+    private var restoreComplete = false
+    private var pendingPlayRequest = false
+
     private val _state = MutableStateFlow(PlaybackUiState())
     val state: StateFlow<PlaybackUiState> = _state.asStateFlow()
 
@@ -113,6 +122,7 @@ class MusicPlayerController(
                     }
                     override fun onPlaybackStateChanged(playbackState: Int) {
                         if (BuildConfig.DEBUG) Log.i(TAG, "state=$playbackState (1=IDLE 2=BUFFERING 3=READY 4=ENDED)")
+                        maybeConsumeDeferredPlay(playbackState)
                         publish()
                     }
                     override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -222,10 +232,21 @@ class MusicPlayerController(
      * (ENDED에서 play()만 호출하면 재생 위치가 끝이라 아무 일도 안 일어나던 문제 수정.)
      */
     private fun startPlayback() {
+        // Cold-start race: until [restore] has loaded the saved queue the player is IDLE/empty,
+        // and while the (restored) track is still BUFFERING its duration is unknown — so we can't
+        // yet tell whether it is parked at its end. In both cases defer the tap and let
+        // [maybeConsumeDeferredPlay] apply it once the track settles at READY/ENDED.
+        if ((!restoreComplete && queue.isEmpty()) || player.playbackState == Player.STATE_BUFFERING) {
+            pendingPlayRequest = true
+            return
+        }
         when (player.playbackState) {
             Player.STATE_IDLE -> { player.prepare(); player.playWhenReady = true }
             Player.STATE_ENDED -> { player.seekTo(0, 0L); player.playWhenReady = true }
-            else -> player.play()
+            else -> { // STATE_READY
+                if (isAtEnd()) player.seekTo(0, 0L) // 끝에서 멈춘 트랙을 다시 누르면 처음부터
+                player.play()
+            }
         }
         publish()
     }
@@ -233,6 +254,27 @@ class MusicPlayerController(
     /** IDLE(에러/미prepare/복원직후)면 재생 전에 재prepare — seek+play가 묻히는 문제 방지. */
     private fun ensurePrepared() {
         if (player.playbackState == Player.STATE_IDLE) player.prepare()
+    }
+
+    /**
+     * 콜드 스타트 경합의 마무리: [restore]가 저장된 큐를 불러오는 동안 들어온 재생 탭은
+     * [startPlayback]에서 [pendingPlayRequest]로 보류됐다. 복원된 트랙이 READY/ENDED로
+     * 자리잡는 순간 그 의도를 적용한다. 복원 위치가 곡 끝이면(직전 세션에서 끝까지 재생됨)
+     * 처음부터 다시 재생한다 — 끝에서 멈춰 "재생을 눌러도 안 되는" 현상 방지.
+     */
+    private fun maybeConsumeDeferredPlay(playbackState: Int) {
+        if (!pendingPlayRequest) return
+        if (playbackState != Player.STATE_READY && playbackState != Player.STATE_ENDED) return
+        pendingPlayRequest = false
+        if (playbackState == Player.STATE_ENDED || isAtEnd()) player.seekTo(0, 0L)
+        player.play()
+        publish()
+    }
+
+    /** 현재(또는 복원된) 위치가 곡 끝 이내인지 — 끝에서 멈춘 트랙 재시작 판단용. */
+    private fun isAtEnd(): Boolean {
+        val dur = player.duration
+        return dur > 0 && player.currentPosition >= dur - END_EPSILON_MS
     }
 
     val isPlaying: Boolean get() = player.isPlaying
@@ -362,19 +404,29 @@ class MusicPlayerController(
     /** 앱 재시작 시 1회: 저장된 큐/현재 곡/위치 복원. 자동 재생 없이 '일시정지'로 노출(사용자가 재생). */
     private fun restore() {
         scope.launch {
-            if (queue.isNotEmpty()) return@launch
-            val snap = settings.playbackSnapshot.first() ?: return@launch
-            if (snap.tracks.isEmpty() || queue.isNotEmpty()) return@launch // suspend 사이 사용자 추가 가드
-            val tracks = snap.tracks.map { TrackInfo(Uri.parse(it.uri), it.title) }
-            queue = tracks
-            player.setMediaItems(
-                tracks.map(::toMediaItem),
-                snap.index.coerceIn(0, tracks.lastIndex),
-                snap.positionMs.coerceAtLeast(0L),
-            )
-            player.prepare()
-            player.playWhenReady = false
-            publish()
+            try {
+                if (queue.isNotEmpty()) return@launch
+                val snap = settings.playbackSnapshot.first() ?: return@launch
+                if (snap.tracks.isEmpty() || queue.isNotEmpty()) return@launch // suspend 사이 사용자 추가 가드
+                val tracks = snap.tracks.map { TrackInfo(Uri.parse(it.uri), it.title) }
+                queue = tracks
+                player.setMediaItems(
+                    tracks.map(::toMediaItem),
+                    snap.index.coerceIn(0, tracks.lastIndex),
+                    snap.positionMs.coerceAtLeast(0L),
+                )
+                player.prepare()
+                // 복원은 항상 '일시정지'로 노출(자동 재생 금지). 스냅샷 로딩 중 들어온 재생 탭은
+                // [pendingPlayRequest]에 기록되며, 트랙이 READY/ENDED로 자리잡는 순간
+                // [maybeConsumeDeferredPlay]가 적용한다(끝 위치면 처음부터).
+                player.playWhenReady = false
+                publish()
+            } finally {
+                restoreComplete = true
+                // 복원할 큐가 없으면(스냅샷 없음/조기 반환) 보류된 재생 의도를 비운다 —
+                // 이후 큐 추가가 의도치 않게 자동 재생되지 않도록.
+                if (queue.isEmpty()) pendingPlayRequest = false
+            }
         }
     }
 
@@ -389,5 +441,6 @@ class MusicPlayerController(
         private const val TAG = "MusicPlayer"
         private const val POSITION_POLL_MS = 500L
         private const val SAVE_EVERY_TICKS = 10 // ~5s마다 위치 저장
+        private const val END_EPSILON_MS = 500L // 복원 위치가 곡 끝 이내면 처음부터 재생
     }
 }

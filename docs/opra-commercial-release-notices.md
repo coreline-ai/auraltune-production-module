@@ -1,8 +1,12 @@
 # OPRA 상업 출시 고지 초안
 
-작성일: `2026-06-26`
+작성일: `2026-06-26` · 상태 갱신: `2026-06-29`
 
-이 문서는 AuralTune 상업 출시 전 OPRA 데이터 사용 고지를 EULA, OSS notice, 앱스토어 설명, 법무 검토 체크리스트로 옮기기 위한 초안이다. 법률 자문이 아니며, 최종 문구는 출시 전 법무 검토를 거쳐 확정한다.
+> **상태(2026-06-29, 사용자 결정):** 현재까지 정리된 고지 내용으로 충분하다고 판단하여 추가 법무 검토는 진행하지 않는다.
+> 또한 AutoEQ 데이터는 MIT(상업적 이용 허용)이므로 앱 내 고지에서 OPRA(CC BY-SA 4.0)와 분리해 AutoEQ 탭에는 MIT 문구만 노출한다.
+> 아래 체크리스트는 출시 차단 항목이 아니라, 현재 채택한 고지 문구의 구성 요소를 기록한 것이다.
+
+이 문서는 AuralTune 상업 출시 전 OPRA 데이터 사용 고지를 EULA, OSS notice, 앱스토어 설명으로 옮기기 위한 초안이다. 법률 자문이 아니다.
 
 ## 적용 기준
 
@@ -76,9 +80,9 @@ AuralTune은 OPRA, Roon Labs 또는 각 헤드폰 제조사의 공식 앱이 아
 | 앱 About / 정보 카드 | OPRA 출처, CC BY-SA 4.0, source link, snapshot commit, no endorsement, 권리 비제한 | 구현됨 | release APK에서 표시 확인 |
 | OPRA 탭 footer | OPRA data, CC BY-SA 4.0, Roon Labs / OPRA 비제휴 | 구현됨 | OPRA 탭 하단 노출 확인 |
 | OPRA profile 상세 | author/source/license, format-converted notice, no endorsement | 구현됨 | 임의 OPRA 프로파일 상세에서 확인 |
-| EULA / 이용약관 | OPRA-derived data, CC BY-SA 4.0 권리 비제한, share-alike 안내, no endorsement | 초안 준비 | 법무 반영/승인 필요 |
-| OSS / Third-party notice | OPRA source URL, license URL, data license, non-affiliation | 초안 준비 | 앱 내 고지와 외부 notice의 문구 불일치 확인 |
-| 앱스토어 설명 | AutoEQ/OPRA 데이터 출처, CC BY-SA attribution, 독립 앱/비공식 고지 | 초안 준비 | 플랫폼별 글자 수/정책 검토 |
+| EULA / 이용약관 | OPRA-derived data, CC BY-SA 4.0 권리 비제한, share-alike 안내, no endorsement | 문구 준비됨 | 현재 고지 문구 기준으로 사용 |
+| OSS / Third-party notice | OPRA source URL, license URL, data license, non-affiliation | 문구 준비됨 | 앱 내 고지와 외부 notice 문구 일치 확인 |
+| 앱스토어 설명 | AutoEQ/OPRA 데이터 출처, CC BY-SA attribution, 독립 앱/비공식 고지 | 문구 준비됨 | 플랫폼별 글자 수에 맞춰 축약 |
 | 개인정보 / 데이터 세이프티 | OPRA 데이터는 앱 번들 snapshot 또는 AuralTune mirror/cache, release 기본 GitHub/Roon 직접 fetch 없음 | 구현 기준 확인 | 스토어 data safety 답변과 네트워크 동작 일치 확인 |
 
 ## 스토어 등록 체크리스트
@@ -103,7 +107,7 @@ AuralTune은 OPRA, Roon Labs 또는 각 헤드폰 제조사의 공식 앱이 아
 | `데이터 재배포 금지` | additional restrictions 금지와 충돌 가능 | `OPRA 데이터 재사용은 CC BY-SA 4.0 조건을 따름` |
 | `헤드폰 제조사 보증 튜닝` | 제조사 보증/공식 인증 오해 | `측정 기반 보정 프로파일` |
 
-## 법무 검토 체크리스트
+## 상업 고지 상태 체크리스트
 
 | 항목 | 상태 | 확인 포인트 |
 |---|---:|---|
@@ -111,8 +115,6 @@ AuralTune은 OPRA, Roon Labs 또는 각 헤드폰 제조사의 공식 앱이 아
 | Share-alike | 준비됨 | OPRA-derived data 권리가 앱 약관에 의해 제한되지 않는다는 문구 포함 |
 | No endorsement | 준비됨 | OPRA/Roon Labs/제조사와 비제휴 문구 포함 |
 | Additional restriction 금지 | 준비됨 | 앱 약관이 CC BY-SA 권리를 제한하지 않는다는 문구 포함 |
-| DRM / 앱스토어 약관 | 법무 검토 필요 | 스토어 DRM과 CC BY-SA 재배포 권리의 충돌 여부 |
-| 데이터베이스권 / 관할권 | 법무 검토 필요 | 국가별 database right 적용 가능성 |
 | 상업 배포 데이터 운영 | 구현됨 | release는 bundled sha256 snapshot 사용, debug만 GitHub raw 허용 |
 | OSS notice 위치 | 구현됨 | 앱 내 About 카드. 별도 웹/스토어 OSS notice 병행 여부 결정 |
 
@@ -123,4 +125,4 @@ AuralTune은 OPRA, Roon Labs 또는 각 헤드폰 제조사의 공식 앱이 아
 .\gradlew.bat --no-daemon --no-build-cache --max-workers=2 "-Dorg.gradle.parallel=false" "-Dorg.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8 -XX:+HeapDumpOnOutOfMemoryError" "-Dkotlin.compiler.execution.strategy=in-process" :app:assembleRelease
 ```
 
-release APK에서 OPRA GitHub raw/API fetch 경로가 기본 source로 쓰이지 않는지는 `OpraSourcePolicyTest`와 release debug-marker scan으로 함께 확인한다.
+release APK에서 OPRA GitHub raw/API fetch 경로가 기본 source로 쓰이지 않는지는 `OpraSourcePolicyTest`와 로컬 release 검증으로 확인한다.

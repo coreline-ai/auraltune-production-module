@@ -81,7 +81,7 @@ Manual EQ
 | Engine integration/range guard | 구현 | `audio-engine/src/test/cpp/RangeValidationTest.cpp` |
 | 앱 UX 회귀 | 후속 | loudness UI가 제품 범위에 들어올 때 별도 추가 |
 
-릴리스 후보의 현재 핵심 검증은 AutoEQ/OPRA 적용, 플레이어 경로, release gate, 16KB alignment, debug marker scan이다. Loudness DSP는 엔진 기능으로 유지하되, 앱 사용자 기능으로 노출하려면 별도 UX와 설정 persistence, on/off 상태 표시, 청감 QA가 필요하다.
+릴리스 후보의 현재 핵심 검증은 AutoEQ/OPRA 적용, 플레이어 경로, 로컬 release 빌드, 16KB alignment, debug marker scan이다. Loudness DSP는 엔진 기능으로 유지하되, 앱 사용자 기능으로 노출하려면 별도 UX와 설정 persistence, on/off 상태 표시, 청감 QA가 필요하다.
 
 ---
 

@@ -10,9 +10,10 @@ Corrections are applied on top of AuralTune's **20-band graphic EQ**, so you can
 
 ## Browse Built-in Profiles
 
-1. Click the **wand icon** next to any headphone device in AuralTune
-2. Search for your headphone model by name
-3. Select a profile. It's applied immediately.
+1. Open the **AutoEQ** tab from the bottom navigation.
+2. Search for your headphone model by name.
+3. Tap a profile card to select it. The selected AutoEQ profile is applied through the shared EQ engine.
+4. Use **원음 / EQ 적용 / 내 설정** to compare the original signal, the selected profile only, or the profile plus your graphic EQ.
 
 The catalog is **DB-first**: a snapshot of the AutoEQ index ships inside the app and is imported into a local Room database on first launch, so search works fully **offline from the first run**. The app refreshes the index from GitHub only when it has actually changed upstream (HTTP ETag). When you select a profile, its parsed filters are fetched once, stored in the database, and re-loaded locally (offline) thereafter — only the engine-relevant fields are stored, never the raw text. The database includes thousands of headphones from major brands (Sony, Sennheiser, Apple, Bose, Audio-Technica, Beyerdynamic, and more).
 
@@ -46,10 +47,10 @@ Raw `ParametricEQ.txt` bodies are not persisted in Room. A stored profile is rea
 
 If you have a custom measurement or want to use a profile from another source:
 
-1. Click **"Import ParametricEQ.txt..."** at the bottom of the AutoEQ panel
+1. Click **"Import EQ"** in the AutoEQ panel
 2. Select your `.txt` file
 3. The profile is imported and applied to the selected device
-4. Use the **Correction** switch in the picker to A/B the profile without removing it
+4. Use **원음 / EQ 적용 / 내 설정** to A/B/C the imported profile without removing it
 
 AuralTune accepts [EqualizerAPO](https://sourceforge.net/projects/equalizerapo/) ParametricEQ.txt files:
 
@@ -80,6 +81,8 @@ Up to 10 filters per profile. The `Preamp` line sets a global gain offset to pre
 ## Managing Profiles
 
 - Each device remembers its assigned profile independently
-- To temporarily bypass a profile, click the wand icon and turn **Correction** off
-- To remove a profile entirely, click the wand icon and select **No correction**
-- Favorite frequently-used profiles for quick access with the star icon — favorited profiles appear at the top of search results and are shown when the search field is empty
+- To temporarily bypass a profile, switch the listen mode to **원음**
+- To hear only the selected AutoEQ/OPRA profile, switch to **EQ 적용**
+- To hear the profile plus the 20-band graphic EQ, switch to **내 설정**
+- To remove the selected profile from the current tab, use the clear button on the profile status card
+- Favorite frequently-used profiles with the star icon so they remain protected from cache cleanup and easier to recognize in result rows

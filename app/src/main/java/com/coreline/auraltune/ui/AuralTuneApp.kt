@@ -1231,6 +1231,7 @@ private fun CorrectionScreen(
         item {
             AboutCard(
                 appVersion = BuildConfig.VERSION_NAME,
+                isOpra = isOpra,
                 opraSnapshotCommit = opraSyncState?.opraCommit ?: opraSyncState?.snapshotVersion,
                 opraSourceUrl = opraSyncState?.sourceUrl,
                 onOpenUrl = openUrl,

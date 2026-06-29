@@ -462,7 +462,7 @@ class AutoEqViewModel(
             if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) {
                 if (!deviceManager.applyResolvedProfile(auto)) {
                     settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                    _importMessage.value = application.getString(R.string.opra_restore_ineligible_route)
+                    _importMessage.value = application.getString(R.string.opra_restore_failed)
                 }
             }
         }
@@ -805,7 +805,7 @@ class AutoEqViewModel(
             if (applied) {
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
             } else {
-                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+                _importMessage.value = application.getString(R.string.profile_apply_failed)
             }
         }
     }
@@ -893,7 +893,7 @@ class AutoEqViewModel(
                 settings.setActiveOpraProfileId(opra.id)
                 settings.addRecentOpraProfile(opra.id, opra.profileName)
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+                _importMessage.value = application.getString(R.string.profile_apply_failed)
             }
         }
     }
@@ -916,7 +916,7 @@ class AutoEqViewModel(
                 settings.setActiveOpraProfileId(recent.id)
                 settings.addRecentOpraProfile(recent.id, recent.name)
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+                _importMessage.value = application.getString(R.string.profile_apply_failed)
             }
         }
     }
@@ -951,7 +951,7 @@ class AutoEqViewModel(
             if (deviceManager.applyResolvedProfile(p)) {
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
             } else {
-                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+                _importMessage.value = application.getString(R.string.profile_apply_failed)
             }
         }
     }
@@ -964,7 +964,7 @@ class AutoEqViewModel(
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
             } else {
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                _importMessage.value = application.getString(R.string.profile_apply_ineligible_route)
+                _importMessage.value = application.getString(R.string.profile_apply_failed)
             }
         }
     }

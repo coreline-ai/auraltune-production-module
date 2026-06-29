@@ -511,13 +511,16 @@ private fun WebLink(text: String, url: String, onOpenUrl: (String) -> Unit) {
 }
 
 /**
- * Collapsible "About & licenses" card (Phase 5). Surfaces the AutoEq + OPRA attributions, the
- * CC BY-SA 4.0 license link, the OPRA project link, the loaded snapshot commit, and the
- * no-endorsement / rights-not-restricted notices required for commercial distribution.
+ * Collapsible "About & licenses" card. License notices are split per tab:
+ *   - AutoEQ tab ([isOpra] = false): only the AutoEq MIT attribution + links.
+ *   - OPRA tab ([isOpra] = true): the OPRA CC BY-SA 4.0 attribution, license link,
+ *     project/source links, loaded snapshot commit, and the no-endorsement /
+ *     rights-not-restricted notices required for commercial distribution.
  */
 @Composable
 fun AboutCard(
     appVersion: String,
+    isOpra: Boolean,
     opraSnapshotCommit: String?,
     opraSourceUrl: String?,
     onOpenUrl: (String) -> Unit,
@@ -555,65 +558,76 @@ fun AboutCard(
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     HorizontalDivider()
-                    // AutoEq
-                    Text(
-                        text = stringResource(R.string.autoeq_attribution),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    HorizontalDivider()
-                    // OPRA
-                    Text(
-                        text = stringResource(R.string.opra_attribution),
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    Text(
-                        text = stringResource(R.string.opra_license_label),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    WebLink(
-                        text = stringResource(R.string.opra_license_link_label),
-                        url = OpraEqProfile.LICENSE_URL,
-                        onOpenUrl = onOpenUrl,
-                    )
-                    WebLink(
-                        text = stringResource(R.string.opra_project_link_label),
-                        url = OPRA_PROJECT_URL,
-                        onOpenUrl = onOpenUrl,
-                    )
-                    // 데이터 출처(원본 데이터셋) 링크 — attribution 요구사항(원본 링크 제공).
-                    opraSourceUrl?.takeIf { it.isNotBlank() }?.let { src ->
+                    if (!isOpra) {
+                        // AutoEQ 탭: MIT 고지만 (상업적 이용이 MIT라 OPRA CC BY-SA 고지와 분리).
+                        Text(
+                            text = stringResource(R.string.autoeq_attribution),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                         WebLink(
-                            text = stringResource(R.string.opra_source_data_link_label),
-                            url = src,
+                            text = stringResource(R.string.autoeq_project_link_label),
+                            url = AUTOEQ_PROJECT_URL,
                             onOpenUrl = onOpenUrl,
                         )
+                        WebLink(
+                            text = stringResource(R.string.autoeq_license_link_label),
+                            url = AUTOEQ_MIT_LICENSE_URL,
+                            onOpenUrl = onOpenUrl,
+                        )
+                    } else {
+                        // OPRA 탭: CC BY-SA 4.0 고지 전체.
+                        Text(
+                            text = stringResource(R.string.opra_attribution),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = stringResource(R.string.opra_license_label),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        WebLink(
+                            text = stringResource(R.string.opra_license_link_label),
+                            url = OpraEqProfile.LICENSE_URL,
+                            onOpenUrl = onOpenUrl,
+                        )
+                        WebLink(
+                            text = stringResource(R.string.opra_project_link_label),
+                            url = OPRA_PROJECT_URL,
+                            onOpenUrl = onOpenUrl,
+                        )
+                        // 데이터 출처(원본 데이터셋) 링크 — attribution 요구사항(원본 링크 제공).
+                        opraSourceUrl?.takeIf { it.isNotBlank() }?.let { src ->
+                            WebLink(
+                                text = stringResource(R.string.opra_source_data_link_label),
+                                url = src,
+                                onOpenUrl = onOpenUrl,
+                            )
+                        }
+                        Text(
+                            text = opraSnapshotCommit
+                                ?.let { stringResource(R.string.opra_snapshot_commit_format, it.take(8)) }
+                                ?: stringResource(R.string.opra_snapshot_none),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        HorizontalDivider()
+                        // 변경 사실 표시(CC BY-SA 4.0 attribution 요구) — 형식 변환만 함을 명시.
+                        Text(
+                            text = stringResource(R.string.opra_changes_notice),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = stringResource(R.string.opra_no_endorsement),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = stringResource(R.string.opra_license_not_restricted),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
-                    Text(
-                        text = opraSnapshotCommit
-                            ?.let { stringResource(R.string.opra_snapshot_commit_format, it.take(8)) }
-                            ?: stringResource(R.string.opra_snapshot_none),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    HorizontalDivider()
-                    // 변경 사실 표시(CC BY-SA 4.0 attribution 요구) — 형식 변환만 함을 명시.
-                    Text(
-                        text = stringResource(R.string.opra_changes_notice),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = stringResource(R.string.opra_no_endorsement),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = stringResource(R.string.opra_license_not_restricted),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
                 }
             }
         }
@@ -690,3 +704,7 @@ fun OpraProfileDetailDialog(
 
 /** OPRA upstream project (CC BY-SA 4.0 data / MIT code). */
 private const val OPRA_PROJECT_URL = "https://github.com/opra-project/OPRA"
+
+/** AutoEq upstream project + its MIT license (commercial use permitted). */
+private const val AUTOEQ_PROJECT_URL = "https://github.com/jaakkopasanen/AutoEq"
+private const val AUTOEQ_MIT_LICENSE_URL = "https://github.com/jaakkopasanen/AutoEq/blob/master/LICENSE"

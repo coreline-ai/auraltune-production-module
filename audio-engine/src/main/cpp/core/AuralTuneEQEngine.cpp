@@ -51,6 +51,7 @@ AuralTuneEQEngine::AuralTuneEQEngine(double sampleRate)
     for (auto& c : boot->loudnessCompCoeffs) c = BiquadCoeffs::unity();
     boot->generation = 0;
     boot->autoEqMixStep = computeAutoEqMixStep(currentRate_);
+    boot->autoEqPreampRampFrames = computeAutoEqPreampRampFrames(currentRate_);
     activeSnapshot_.store(boot, std::memory_order_release);
 
     // Pre-size the AutoEQ crossfade dry-copy buffer so the audio thread never
@@ -63,13 +64,57 @@ float AuralTuneEQEngine::computeAutoEqMixStep(double rate) {
     return static_cast<float>(1.0 / (static_cast<double>(kAutoEqRampSeconds) * r));
 }
 
+int AuralTuneEQEngine::computeAutoEqPreampRampFrames(double rate) {
+    const double r = (rate > 0.0) ? rate : 48000.0;
+    const int frames = static_cast<int>(
+        static_cast<double>(kAutoEqPreampRampSeconds) * r + 0.5);
+    return frames > 1 ? frames : 1;
+}
+
 void AuralTuneEQEngine::applyAutoEqCascade(const EngineSnapshot* s,
                                            float* pcm, int numFrames) noexcept {
-    if (s->preampOn && s->autoEqPreampLinear != 1.0f) {
-        const float g = s->autoEqPreampLinear;
+    float preampTarget = s->preampOn ? s->autoEqPreampLinear : 1.0f;
+    if (!std::isfinite(preampTarget) || preampTarget <= 0.0f) {
+        preampTarget = 1.0f;
+    }
+
+    if (!autoEqPreampInit_) {
+        autoEqPreampCurrent_ = preampTarget;
+        autoEqPreampTarget_ = preampTarget;
+        autoEqPreampStep_ = 0.0f;
+        autoEqPreampFramesRemaining_ = 0;
+        autoEqPreampInit_ = true;
+    }
+
+    if (std::fabs(preampTarget - autoEqPreampTarget_) > 1.0e-7f) {
+        autoEqPreampTarget_ = preampTarget;
+        autoEqPreampFramesRemaining_ =
+            (s->autoEqPreampRampFrames > 0) ? s->autoEqPreampRampFrames : 1;
+        autoEqPreampStep_ =
+            (autoEqPreampTarget_ - autoEqPreampCurrent_) /
+            static_cast<float>(autoEqPreampFramesRemaining_);
+    }
+
+    if (autoEqPreampFramesRemaining_ > 0) {
+        for (int i = 0; i < numFrames; ++i) {
+            const float g = autoEqPreampCurrent_;
+            const int l = 2 * i;
+            pcm[l] *= g;
+            pcm[l + 1] *= g;
+
+            autoEqPreampCurrent_ += autoEqPreampStep_;
+            --autoEqPreampFramesRemaining_;
+            if (autoEqPreampFramesRemaining_ <= 0) {
+                autoEqPreampCurrent_ = autoEqPreampTarget_;
+                autoEqPreampStep_ = 0.0f;
+            }
+        }
+    } else if (std::fabs(autoEqPreampCurrent_ - 1.0f) > 1.0e-7f) {
+        const float g = autoEqPreampCurrent_;
         const int total = numFrames * 2;
         for (int i = 0; i < total; ++i) pcm[i] *= g;
     }
+
     const int n = (s->autoEqCount < kMaxAutoEqFilters)
                       ? s->autoEqCount : kMaxAutoEqFilters;
     for (int i = 0; i < n; ++i) {
@@ -349,6 +394,7 @@ void AuralTuneEQEngine::writeAllCoeffsInto(EngineSnapshot& dst) const {
     // AutoEQ crossfade ramp step depends only on the sample rate — refresh it
     // here so a rate change keeps the 0.5 s fade duration correct.
     dst.autoEqMixStep = computeAutoEqMixStep(currentRate_);
+    dst.autoEqPreampRampFrames = computeAutoEqPreampRampFrames(currentRate_);
 }
 
 // ---------------------------------------------------------------------------
