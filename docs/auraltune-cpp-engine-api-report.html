@@ -1,0 +1,1063 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AuralTune SO Engine API Guide</title>
+  <style>
+    :root {
+      --bg: #eef2f6;
+      --paper: #ffffff;
+      --ink: #16202a;
+      --muted: #627083;
+      --line: #d8e0e8;
+      --soft: #f6f8fb;
+      --soft-2: #eef5f7;
+      --accent: #1f6f8b;
+      --accent-deep: #12323d;
+      --ok: #0b6e4f;
+      --warn: #9a5b00;
+      --risk: #9f1d35;
+      --code: #101820;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", Roboto, Arial, sans-serif;
+      line-height: 1.62;
+    }
+
+    .page {
+      width: min(1180px, 100%);
+      min-height: 100vh;
+      margin: 0 auto;
+      background: var(--paper);
+      box-shadow: 0 18px 60px rgba(23, 32, 42, 0.12);
+    }
+
+    header {
+      padding: 48px 58px 36px;
+      color: #fff;
+      background: linear-gradient(135deg, var(--accent-deep) 0%, var(--accent) 62%, #5e8c72 100%);
+    }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 13px;
+      font-weight: 750;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(29px, 4vw, 40px);
+      line-height: 1.22;
+      letter-spacing: 0;
+    }
+
+    header p {
+      max-width: 930px;
+      margin: 0;
+      color: rgba(255, 255, 255, 0.92);
+      font-size: 17px;
+    }
+
+    main {
+      padding: 34px 58px 58px;
+    }
+
+    section {
+      padding: 30px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    section:last-child {
+      border-bottom: 0;
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      color: var(--accent-deep);
+      font-size: 24px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 25px 0 10px;
+      color: #233346;
+      font-size: 18px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .metric {
+      min-height: 110px;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 22px;
+    }
+
+    .metric span {
+      color: rgba(255, 255, 255, 0.86);
+      font-size: 13px;
+    }
+
+    .note,
+    .warn,
+    .ok {
+      padding: 16px 18px;
+      border-radius: 7px;
+      background: var(--soft);
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+    }
+
+    .warn {
+      border-left: 4px solid var(--warn);
+    }
+
+    .ok {
+      border-left: 4px solid var(--ok);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 16px;
+    }
+
+    .box {
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .box strong {
+      display: block;
+      margin-bottom: 6px;
+      color: #1e3040;
+    }
+
+    .flow {
+      overflow-x: auto;
+      margin: 16px 0 0;
+      padding: 18px;
+      border-radius: 8px;
+      background: #f0f5f8;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      white-space: pre;
+      color: #1d2c3a;
+    }
+
+    table {
+      width: 100%;
+      margin: 14px 0 22px;
+      border-collapse: collapse;
+      table-layout: fixed;
+      font-size: 14px;
+    }
+
+    th,
+    td {
+      padding: 12px 13px;
+      vertical-align: top;
+      border: 1px solid var(--line);
+    }
+
+    th {
+      color: #213140;
+      background: #edf3f7;
+      text-align: left;
+      font-weight: 750;
+    }
+
+    tbody tr:nth-child(even) td {
+      background: #fafbfd;
+    }
+
+    code,
+    pre {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    }
+
+    code {
+      padding: 2px 5px;
+      border-radius: 4px;
+      color: #11202b;
+      background: #eef3f7;
+      font-size: 0.92em;
+    }
+
+    pre {
+      overflow-x: auto;
+      margin: 14px 0 22px;
+      padding: 18px;
+      border-radius: 8px;
+      color: #e6edf3;
+      background: var(--code);
+      line-height: 1.48;
+    }
+
+    pre code {
+      padding: 0;
+      color: inherit;
+      background: transparent;
+      font-size: 13px;
+    }
+
+    .prototype {
+      color: #0f2530;
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      font-size: 13px;
+    }
+
+    .status {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+
+    .used {
+      color: #063e2c;
+      background: #dff4ea;
+    }
+
+    .ready {
+      color: #6a4100;
+      background: #fff1d6;
+    }
+
+    .info {
+      color: #0f4b60;
+      background: #dff3f8;
+    }
+
+    .risk {
+      color: #7b1730;
+      background: #fde4ea;
+    }
+
+    .toc {
+      columns: 2;
+      margin: 12px 0 0;
+      padding-left: 20px;
+    }
+
+    .toc li {
+      margin: 5px 0;
+      break-inside: avoid;
+    }
+
+    .source-list {
+      margin: 8px 0 0;
+      padding-left: 20px;
+    }
+
+    .source-list li {
+      margin: 5px 0;
+    }
+
+    @media (max-width: 860px) {
+      header,
+      main {
+        padding-left: 22px;
+        padding-right: 22px;
+      }
+
+      .summary,
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+
+      .toc {
+        columns: 1;
+      }
+
+      table {
+        display: block;
+        overflow-x: auto;
+        table-layout: auto;
+        white-space: nowrap;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="eyebrow">AuralTune Native Audio Engine</p>
+      <h1>SO 엔진 API 가이드</h1>
+      <p>
+        AuralTune의 native SO 엔진을 실제 앱 코드에서 사용하는 방법을 기능별 샘플과 함께 정리한 문서입니다.
+        C++ 함수 원형, Kotlin wrapper 호출법, PCM 포맷별 처리, AudioTrack/ExoPlayer 연결 시 주의점을 함께 다룹니다.
+      </p>
+      <div class="summary">
+        <div class="metric">
+          <strong>Float32 DSP</strong>
+          <span>엔진 내부 처리 코어</span>
+        </div>
+        <div class="metric">
+          <strong>S16/S24/S32/F32</strong>
+          <span>입출력 경계 지원</span>
+        </div>
+        <div class="metric">
+          <strong>8k-384kHz</strong>
+          <span>sampleRate 허용 범위</span>
+        </div>
+        <div class="metric">
+          <strong>16-bit 출력</strong>
+          <span>현재 앱 플레이어 정책</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section id="overview">
+        <h2>1. 문서 목적</h2>
+        <div class="note">
+          이 문서는 단순 함수 목록이 아니라, SO 엔진을 실제 재생 파이프라인에 붙일 때 어떤 순서로 호출해야 하는지 보여주는 API 가이드입니다.
+          표준 진입점은 Kotlin wrapper인 <code>AudioEngine</code>이며, C++ 함수는 JNI 뒤에서 실제 DSP 처리를 수행합니다.
+        </div>
+
+        <h3>목차</h3>
+        <ol class="toc">
+          <li><a href="#architecture">호출 구조</a></li>
+          <li><a href="#quick-start">Quick Start</a></li>
+          <li><a href="#format-contract">PCM 포맷 계약</a></li>
+          <li><a href="#feature-samples">기능별 사용 샘플</a></li>
+          <li><a href="#processing">오디오 처리 샘플</a></li>
+          <li><a href="#diagnostics">진단/상태 조회</a></li>
+          <li><a href="#cpp-prototypes">C++ 함수 원형</a></li>
+          <li><a href="#integration-policy">현재 앱 적용 상태</a></li>
+        </ol>
+      </section>
+
+      <section id="architecture">
+        <h2>2. 호출 구조</h2>
+        <p>앱 코드에서 직접 만지는 계층은 <code>AudioEngine.kt</code>입니다. C++ 원형은 SO 내부 구현 계약이고, JNI는 양쪽을 연결합니다.</p>
+        <div class="flow">App / ViewModel / Player
+        ↓
+AudioEngine.kt  Kotlin wrapper
+        ↓
+AudioEngineJNI.cpp  JNI bridge
+        ↓
+AuralTuneEQEngine.cpp  native SO DSP engine
+        ↓
+Float32 DSP core + PCM format boundary</div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>계층</th>
+              <th>대표 파일</th>
+              <th>역할</th>
+              <th>직접 사용 여부</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Kotlin API</td>
+              <td><code>AudioEngine.kt</code></td>
+              <td>앱/플레이어/뷰모델이 호출하는 표준 API</td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>JNI Bridge</td>
+              <td><code>AudioEngineJNI.cpp</code></td>
+              <td>핸들, 배열, DirectByteBuffer, 에러 코드 검증</td>
+              <td><span class="status info">직접 호출 안 함</span></td>
+            </tr>
+            <tr>
+              <td>C++ Engine</td>
+              <td><code>AuralTuneEQEngine.cpp/.h</code></td>
+              <td>실제 EQ, loudness, limiter, DSP 처리</td>
+              <td><span class="status info">JNI 뒤에서 호출</span></td>
+            </tr>
+            <tr>
+              <td>PCM 변환</td>
+              <td><code>PcmConvert.h</code></td>
+              <td>S16/S24/S32/F32와 float32 DSP 코어 간 변환</td>
+              <td><span class="status info">processFormatted에서 사용</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="quick-start">
+        <h2>3. Quick Start</h2>
+        <p>새 오디오 파이프라인에서 엔진을 붙이는 최소 흐름입니다.</p>
+        <pre><code class="language-kotlin">import com.coreline.audio.AudioEngine
+import com.coreline.audio.Builder
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+// 1. 실제 PCM stream sampleRate와 같은 값으로 엔진 생성
+val engine = AudioEngine.Builder()
+    .forSampleRate(48_000)
+    .build()
+
+try {
+    // 2. 필요하면 EQ 설정
+    engine.updateManualEq(
+        frequencies = floatArrayOf(80f, 2500f, 7000f),
+        gainsDB = floatArrayOf(3.0f, 2.0f, -1.5f),
+        qFactors = floatArrayOf(0.7f, 1.2f, 2.5f),
+        filterTypes = intArrayOf(1, 0, 0), // LOW_SHELF, PEAKING, PEAKING
+    )
+    engine.setManualEqEnabled(true)
+
+    // 3. 오디오 콜백/AudioProcessor에서 stereo interleaved float32 처리
+    val frames = 1024
+    val pcm = ByteBuffer
+        .allocateDirect(frames * 2 * 4)
+        .order(ByteOrder.nativeOrder())
+
+    val rc = engine.process(pcm, frames)
+    check(rc == 0) { "engine.process failed: $rc" }
+} finally {
+    // 4. 오디오 스레드가 끝난 뒤 해제
+    engine.close()
+}</code></pre>
+
+        <div class="warn">
+          <strong>중요:</strong> 엔진의 sampleRate는 실제로 처리하는 PCM stream rate와 같아야 합니다.
+          44.1kHz 음원을 48kHz 엔진으로 처리하면 오디오는 흐르지만 필터 중심 주파수가 비율만큼 어긋납니다.
+        </div>
+      </section>
+
+      <section id="format-contract">
+        <h2>4. PCM 포맷 계약</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>포맷</th>
+              <th>Kotlin enum</th>
+              <th>Native ID</th>
+              <th>Bytes/sample</th>
+              <th>입력</th>
+              <th>출력</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>16-bit signed PCM</td>
+              <td><code>PcmFormat.S16</code></td>
+              <td>0</td>
+              <td>2</td>
+              <td>가능</td>
+              <td>가능</td>
+            </tr>
+            <tr>
+              <td>24-bit packed PCM</td>
+              <td><code>PcmFormat.S24</code></td>
+              <td>1</td>
+              <td>3</td>
+              <td>가능</td>
+              <td>가능</td>
+            </tr>
+            <tr>
+              <td>32-bit signed PCM</td>
+              <td><code>PcmFormat.S32</code></td>
+              <td>2</td>
+              <td>4</td>
+              <td>가능</td>
+              <td>가능</td>
+            </tr>
+            <tr>
+              <td>32-bit float PCM</td>
+              <td><code>PcmFormat.F32</code></td>
+              <td>3</td>
+              <td>4</td>
+              <td>가능</td>
+              <td>가능</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="ok">
+          <strong>해석:</strong> SO 엔진은 24-bit/32-bit 입력 처리가 구현되어 있습니다.
+          다만 현재 AuralTune 플레이어 경로는 최종 출력을 16-bit로 고정하고 있어,
+          고해상도 출력은 <code>processFormatted()</code>를 실제 플레이어 경로에 연결해야 활성화됩니다.
+        </div>
+      </section>
+
+      <section id="feature-samples">
+        <h2>5. 기능별 사용 샘플</h2>
+
+        <h3>5.1 엔진 생성</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>상황</th>
+              <th>권장 사용법</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>AudioTrack을 직접 생성하는 경우</td>
+              <td><code>AudioEngine.Builder().forAudioTrack(track).build()</code></td>
+            </tr>
+            <tr>
+              <td>ExoPlayer AudioProcessor처럼 stream rate만 받는 경우</td>
+              <td><code>AudioEngine.Builder().forSampleRate(sampleRate).build()</code></td>
+            </tr>
+            <tr>
+              <td>기존 AuralTune 앱</td>
+              <td><code>ServiceLocator.createAudioEngine()</code> 후 AudioProcessor configure에서 <code>updateSampleRate()</code></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <pre><code class="language-kotlin">// AudioTrack 기반: 트랙이 initialized 된 뒤 sampleRate를 읽어 엔진 생성
+val track: AudioTrack = buildAudioTrack(...)
+val engine = AudioEngine.Builder()
+    .forAudioTrack(track)
+    .build()
+
+// 명시 sampleRate 기반
+val engine = AudioEngine.Builder()
+    .forSampleRate(96_000)
+    .build()</code></pre>
+
+        <h3>5.2 AutoEQ / OPRA 프로파일 적용</h3>
+        <p>AutoEQ와 OPRA 모두 native 엔진 입장에서는 같은 AutoEQ filter chain입니다. 차이는 데이터 출처와 파싱 경로입니다.</p>
+        <pre><code class="language-kotlin">import com.coreline.audio.EqFilterType
+
+val types = intArrayOf(
+    EqFilterType.PEAKING.nativeId,
+    EqFilterType.LOW_SHELF.nativeId,
+    EqFilterType.HIGH_SHELF.nativeId,
+)
+val freqs = floatArrayOf(1200f, 80f, 9000f)
+val gains = floatArrayOf(-2.0f, 3.5f, -1.5f)
+val qs = floatArrayOf(1.2f, 0.7f, 0.8f)
+
+val rc = engine.updateAutoEq(
+    preampDB = -5.5f,
+    enableLimiter = true,
+    profileOptimizedRate = 48_000.0,
+    filterTypes = types,
+    frequencies = freqs,
+    gainsDB = gains,
+    qFactors = qs,
+)
+check(rc == 0) { "AutoEQ rejected: $rc" }
+
+// 일반 전환: 0.5초 wet/dry fade
+engine.setAutoEqEnabled(true, immediate = false)
+
+// 긴급 bypass: fade 없이 즉시 off
+engine.setAutoEqEnabled(false, immediate = true)</code></pre>
+
+        <table>
+          <thead>
+            <tr>
+              <th>제약</th>
+              <th>값</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>AutoEQ 최대 필터 수</td>
+              <td><code>10</code></td>
+            </tr>
+            <tr>
+              <td>지원 filter type</td>
+              <td><code>PEAKING</code>, <code>LOW_SHELF</code>, <code>HIGH_SHELF</code>, <code>HIGH_PASS</code></td>
+            </tr>
+            <tr>
+              <td>전환 smoothing</td>
+              <td><code>setAutoEqEnabled(..., immediate = false)</code> 기준 약 0.5초</td>
+            </tr>
+            <tr>
+              <td>preamp smoothing</td>
+              <td>native 내부에서 약 30ms glide</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>5.3 AutoEQ 제거</h3>
+        <pre><code class="language-kotlin">// 프로파일이 없거나 출력 route가 지원 대상이 아닐 때
+engine.setAutoEqEnabled(false, immediate = true)
+engine.clearAutoEq()</code></pre>
+
+        <h3>5.4 내 설정 / 그래픽 EQ / 파라메트릭 EQ</h3>
+        <p>사용자 EQ는 <code>updateManualEq()</code>로 들어갑니다. 그래픽 EQ는 고정 주파수 peaking band로 변환하고, 파라메트릭 EQ는 사용자가 고른 type/frequency/gain/Q를 그대로 전달합니다.</p>
+        <pre><code class="language-kotlin">val rc = engine.updateManualEq(
+    frequencies = floatArrayOf(80f, 250f, 1500f, 7000f),
+    gainsDB = floatArrayOf(4.0f, -2.0f, 2.0f, -3.0f),
+    qFactors = floatArrayOf(0.7f, 1.1f, 1.0f, 3.0f),
+    filterTypes = intArrayOf(
+        EqFilterType.LOW_SHELF.nativeId,
+        EqFilterType.PEAKING.nativeId,
+        EqFilterType.PEAKING.nativeId,
+        EqFilterType.PEAKING.nativeId,
+    ),
+)
+
+if (rc == 0) {
+    engine.setManualEqEnabled(true)
+} else {
+    engine.setManualEqEnabled(false)
+    error("Manual EQ rejected: $rc")
+}</code></pre>
+
+        <table>
+          <thead>
+            <tr>
+              <th>항목</th>
+              <th>설명</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Manual 최대 필터 수</td>
+              <td><code>20</code></td>
+            </tr>
+            <tr>
+              <td>High Pass gain</td>
+              <td>gain 값은 무시되지만 finite 값은 전달해야 함. 보통 <code>0.0f</code></td>
+            </tr>
+            <tr>
+              <td>실패 처리</td>
+              <td>음질/안전상 실패 시 manual chain을 off로 내리는 것이 권장됨</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>5.5 Loudness Compensation</h3>
+        <p>볼륨이 낮을 때 청감상 부족해지는 저역/고역을 보정하는 ISO 226 계열 보정입니다.</p>
+        <pre><code class="language-kotlin">// system volume을 0.0..1.0으로 정규화한 값
+val normalizedVolume = 0.42f
+
+engine.setLoudnessCompensationVolume(normalizedVolume)
+engine.setLoudnessCompensationEnabled(true)
+
+// 끄기
+engine.setLoudnessCompensationEnabled(false)</code></pre>
+
+        <h3>5.6 Loudness EQ / Auto Leveler</h3>
+        <p>콘텐츠 간 음량 차이를 줄이는 BS.1770 계열 auto-leveler입니다.</p>
+        <pre><code class="language-kotlin">engine.updateLoudnessEqSettings(
+    targetLoudnessDb = -12f,
+    maxBoostDb = 15f,
+    maxCutDb = 4f,
+    compressionThresholdOffsetDb = 6f,
+    compressionRatio = 1.6f,
+    compressionKneeDb = 8f,
+    gainAttackMs = 180f,
+    gainReleaseMs = 5000f,
+)
+engine.setLoudnessEqEnabled(true)</code></pre>
+      </section>
+
+      <section id="processing">
+        <h2>6. 오디오 처리 샘플</h2>
+
+        <h3>6.1 현재 앱 방식: Float32 in-place 처리</h3>
+        <p>현재 AuralTune 앱은 이 경로를 사용합니다. 입력 PCM을 Kotlin에서 float32 direct buffer로 변환하고, native 엔진은 float32 stereo interleaved buffer를 in-place로 처리합니다.</p>
+        <pre><code class="language-kotlin">val channels = 2
+val frames = 1024
+val samples = frames * channels
+
+val floatBuffer = ByteBuffer
+    .allocateDirect(samples * 4)
+    .order(ByteOrder.nativeOrder())
+
+// floatBuffer에 stereo interleaved float32 PCM을 채움
+// L0, R0, L1, R1, ...
+
+val rc = engine.process(floatBuffer, frames)
+if (rc != 0) {
+    // 실시간 콜백에서는 throw 대신 bypass/fallback 권장
+}</code></pre>
+
+        <h3>6.2 고해상도 확장 방식: 24-bit packed 입출력</h3>
+        <p><code>processFormatted()</code>는 SO 내부에서 S24 → float32 → DSP → S24 변환을 수행합니다.</p>
+        <pre><code class="language-kotlin">import com.coreline.audio.PcmFormat
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+
+val frames = 1024
+val channels = 2
+
+val inputS24 = ByteBuffer
+    .allocateDirect(frames * channels * PcmFormat.S24.bytesPerSample)
+    .order(ByteOrder.nativeOrder())
+
+val outputS24 = ByteBuffer
+    .allocateDirect(frames * channels * PcmFormat.S24.bytesPerSample)
+    .order(ByteOrder.nativeOrder())
+
+// inputS24에 little-endian 24-bit packed PCM 채우기
+
+val rc = engine.processFormatted(
+    input = inputS24,
+    inputFormat = PcmFormat.S24,
+    output = outputS24,
+    outputFormat = PcmFormat.S24,
+    numFrames = frames,
+)
+check(rc == 0) { "processFormatted failed: $rc" }
+
+// outputS24를 ENCODING_PCM_24BIT_PACKED AudioTrack에 write</code></pre>
+
+        <h3>6.3 32-bit / float 출력</h3>
+        <pre><code class="language-kotlin">// 32-bit signed PCM 입력 → 32-bit signed PCM 출력
+engine.processFormatted(inputS32, PcmFormat.S32, outputS32, PcmFormat.S32, frames)
+
+// float PCM 입력 → float PCM 출력
+// in-place는 input/output 모두 F32일 때만 허용됨
+engine.processFormatted(floatBuffer, PcmFormat.F32, floatBuffer, PcmFormat.F32, frames)</code></pre>
+
+        <div class="warn">
+          <strong>주의:</strong> <code>processFormatted()</code>는 첫 대형 호출에서 내부 float scratch buffer가 커질 수 있습니다.
+          실시간 콜백 전에 예상 최대 frame 수로 warmup 호출을 해두면 callback 중 allocation 가능성을 줄일 수 있습니다.
+        </div>
+
+        <h3>6.4 샘플레이트 변경</h3>
+        <p>곡이 바뀌면서 sampleRate가 달라지면 오디오 sink 재설정과 함께 엔진 sampleRate도 바꿔야 합니다.</p>
+        <pre><code class="language-kotlin">fun onAudioFormatChanged(sampleRateHz: Int) {
+    if (engine.sampleRate != sampleRateHz) {
+        engine.updateSampleRate(sampleRateHz)
+    }
+}</code></pre>
+      </section>
+
+      <section id="diagnostics">
+        <h2>7. 진단/상태 조회</h2>
+
+        <h3>7.1 Diagnostics</h3>
+        <pre><code class="language-kotlin">val d = engine.readDiagnostics()
+
+println("xrun=${d.xrunCount}")
+println("nonFiniteReset=${d.nonFiniteResetCount}")
+println("sampleRateChanges=${d.sampleRateChangeCount}")
+println("configSwaps=${d.configSwapCount}")
+println("frames=${d.totalProcessedFrames}")
+println("generation=${d.appliedGeneration}")
+println("autoEqActiveCount=${d.autoEqActiveCount}")</code></pre>
+
+        <h3>7.2 AppliedSnapshot</h3>
+        <pre><code class="language-kotlin">val s = engine.readAppliedSnapshot()
+
+val isAutoEqReallyApplied =
+    s.autoEqEnabled &amp;&amp; s.autoEqFilterCount &gt; 0
+
+val isManualApplied = s.manualEnabled
+val preampGain = s.preampLinearGain</code></pre>
+
+        <h3>7.3 AudioTrack underrun 기록</h3>
+        <pre><code class="language-kotlin">val before = previousUnderrunCount
+val now = audioTrack.underrunCount
+val delta = now - before
+
+if (delta &gt; 0) {
+    engine.recordXrun(delta.toLong())
+}</code></pre>
+      </section>
+
+      <section id="error-codes">
+        <h2>8. 주요 에러 코드</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>함수</th>
+              <th>코드</th>
+              <th>의미</th>
+              <th>권장 처리</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>updateAutoEq()</code></td>
+              <td><code>0</code></td>
+              <td>성공</td>
+              <td>AutoEQ enable 가능</td>
+            </tr>
+            <tr>
+              <td><code>updateAutoEq()</code></td>
+              <td><code>-1</code></td>
+              <td>NaN, 범위 초과, count 오류 등 numeric validation 실패</td>
+              <td>프로파일 reject, engine clear</td>
+            </tr>
+            <tr>
+              <td><code>updateAutoEq()</code></td>
+              <td><code>-2</code></td>
+              <td>filter type validation 실패</td>
+              <td>해당 profile 파서/데이터 점검</td>
+            </tr>
+            <tr>
+              <td><code>process()</code></td>
+              <td><code>0</code></td>
+              <td>성공</td>
+              <td>정상 출력</td>
+            </tr>
+            <tr>
+              <td><code>process()</code></td>
+              <td><code>&lt;0</code></td>
+              <td>닫힌 handle, buffer 오류, capacity 부족 등</td>
+              <td>실시간 경로에서는 bypass/fallback</td>
+            </tr>
+            <tr>
+              <td><code>processFormatted()</code></td>
+              <td><code>-7</code></td>
+              <td>지원하지 않는 PCM format id</td>
+              <td><code>PcmFormat</code> enum만 사용</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="cpp-prototypes">
+        <h2>9. C++ 함수 원형</h2>
+        <p>아래는 실제 SO 엔진의 C++ public 함수 원형입니다.</p>
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 22%;">분류</th>
+              <th>함수 원형</th>
+              <th style="width: 16%;">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>생성</td>
+              <td class="prototype"><code>explicit AuralTuneEQEngine(double sampleRate);</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>소멸</td>
+              <td class="prototype"><code>~AuralTuneEQEngine();</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>AutoEQ 업데이트</td>
+              <td class="prototype"><code>int updateAutoEq(float preampDB, bool enableLimiter, double profileOptimizedRate, const int* filterTypes, const float* frequencies, const float* gainsDB, const float* qs, int count);</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>Manual EQ 업데이트</td>
+              <td class="prototype"><code>int updateManualEq(const float* frequencies, const float* gainsDB, const float* qs, const int* types, int count);</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>AutoEQ on/off</td>
+              <td class="prototype"><code>void setAutoEqEnabled(bool e, bool immediate = false);</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>Manual EQ on/off</td>
+              <td class="prototype"><code>void setManualEqEnabled(bool e);</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>AutoEQ preamp on/off</td>
+              <td class="prototype"><code>void setAutoEqPreampEnabled(bool e);</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>Loudness Compensation</td>
+              <td class="prototype"><code>void setLoudnessCompensationEnabled(bool e);</code></td>
+              <td><span class="status used">사용 가능</span></td>
+            </tr>
+            <tr>
+              <td>Loudness Compensation volume</td>
+              <td class="prototype"><code>int setLoudnessCompensationVolume(float systemVolume0to1);</code></td>
+              <td><span class="status used">사용 가능</span></td>
+            </tr>
+            <tr>
+              <td>Loudness EQ on/off</td>
+              <td class="prototype"><code>void setLoudnessEqEnabled(bool e);</code></td>
+              <td><span class="status used">사용 가능</span></td>
+            </tr>
+            <tr>
+              <td>Loudness EQ 설정</td>
+              <td class="prototype"><code>void updateLoudnessEqSettings(float targetLoudnessDb, float maxBoostDb, float maxCutDb, float compressionThresholdOffsetDb, float compressionRatio, float compressionKneeDb, float gainAttackMs, float gainReleaseMs);</code></td>
+              <td><span class="status used">사용 가능</span></td>
+            </tr>
+            <tr>
+              <td>샘플레이트 변경</td>
+              <td class="prototype"><code>void updateSampleRate(int newRate);</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>Float32 처리</td>
+              <td class="prototype"><code>int process(float* pcm, int numFrames) noexcept;</code></td>
+              <td><span class="status used">현재 핵심</span></td>
+            </tr>
+            <tr>
+              <td>포맷 지정 처리</td>
+              <td class="prototype"><code>int processFormatted(const uint8_t* in, int inFormat, uint8_t* out, int outFormat, int numFrames) noexcept;</code></td>
+              <td><span class="status ready">구현됨</span></td>
+            </tr>
+            <tr>
+              <td>xrun 기록</td>
+              <td class="prototype"><code>void recordXrun(int64_t deltaUnderrunFrames) noexcept;</code></td>
+              <td><span class="status used">사용 가능</span></td>
+            </tr>
+            <tr>
+              <td>진단 조회</td>
+              <td class="prototype"><code>Diagnostics readDiagnostics() const noexcept;</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+            <tr>
+              <td>적용 상태 조회</td>
+              <td class="prototype"><code>AppliedSnapshot readAppliedSnapshot() const noexcept;</code></td>
+              <td><span class="status used">사용</span></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h3>RBJ 계수 빌더</h3>
+        <pre><code class="language-cpp">static BiquadCoeffs peakingCoeffs(double freq, float gainDB, double q, double sampleRate);
+static BiquadCoeffs lowShelfCoeffs(double freq, float gainDB, double q, double sampleRate);
+static BiquadCoeffs highShelfCoeffs(double freq, float gainDB, double q, double sampleRate);
+static BiquadCoeffs highPassCoeffs(double freq, double q, double sampleRate);</code></pre>
+
+        <h3>PCM 변환 함수</h3>
+        <pre><code class="language-cpp">inline bool isValidPcmFormat(int v);
+inline int bytesPerSample(PcmFormat f);
+inline int64_t clampI64(int64_t v, int64_t lo, int64_t hi);
+inline void decodeToFloat(const uint8_t* in, PcmFormat f, float* out, int samples);
+inline void encodeFromFloat(const float* in, uint8_t* out, PcmFormat f, int samples);</code></pre>
+      </section>
+
+      <section id="integration-policy">
+        <h2>10. 현재 앱 적용 상태와 확장 방향</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>항목</th>
+              <th>현재 상태</th>
+              <th>고도화 시 작업</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>플레이어 출력</td>
+              <td>16-bit PCM 고정</td>
+              <td>음원/기기 조건에 따라 S24/S32/F32 출력 정책 추가</td>
+            </tr>
+            <tr>
+              <td>엔진 처리</td>
+              <td><code>process(float*)</code> 사용</td>
+              <td><code>processFormatted()</code>를 AudioProcessor 출력 경로에 연결</td>
+            </tr>
+            <tr>
+              <td>24-bit AudioTrack</td>
+              <td>PD20/SM-S931N에서 생성 및 write 검증됨</td>
+              <td>bit-perfect 보장 문구는 금지, direct path 별도 검증 필요</td>
+            </tr>
+            <tr>
+              <td>곡별 포맷 변경</td>
+              <td>ExoPlayer sink가 재구성 가능</td>
+              <td>포맷 변경 시 engine sampleRate와 output format 동기화</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="flow">현재 앱:
+PCM input → Kotlin float 변환 → process(float*) → Kotlin 16-bit 변환 → AudioTrack
+
+고해상도 확장:
+S24 input → processFormatted(S24, S24) → AudioTrack S24
+S32 input → processFormatted(S32, S32) → AudioTrack S32
+F32 input → processFormatted(F32, F32) → AudioTrack F32</div>
+      </section>
+
+      <section id="checklist">
+        <h2>11. 구현 체크리스트</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>체크 항목</th>
+              <th>필수 기준</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>sampleRate</td>
+              <td>AudioTrack/ExoPlayer stream rate와 <code>engine.sampleRate</code> 일치</td>
+            </tr>
+            <tr>
+              <td>buffer</td>
+              <td>DirectByteBuffer 사용, capacity는 <code>frames * 2 * bytesPerSample</code> 이상</td>
+            </tr>
+            <tr>
+              <td>thread</td>
+              <td><code>process()</code>는 audio thread에서, 설정 변경은 control/main thread에서 호출</td>
+            </tr>
+            <tr>
+              <td>lifecycle</td>
+              <td>오디오 thread join 후 <code>engine.close()</code></td>
+            </tr>
+            <tr>
+              <td>fallback</td>
+              <td>native 처리 실패 시 실시간 경로에서는 throw 대신 bypass/fallback</td>
+            </tr>
+            <tr>
+              <td>고해상도 출력</td>
+              <td>AudioTrack format 지원과 direct/bit-perfect 여부를 별도로 구분</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="sources">
+        <h2>12. 참고 소스</h2>
+        <ul class="source-list">
+          <li><code>audio-engine/src/main/java/com/coreline/audio/AudioEngine.kt</code></li>
+          <li><code>audio-engine/src/main/java/com/coreline/audio/AudioEngineBuilder.kt</code></li>
+          <li><code>audio-engine/src/main/java/com/coreline/audio/EqFilterType.kt</code></li>
+          <li><code>audio-engine/src/main/java/com/coreline/audio/PcmFormat.kt</code></li>
+          <li><code>audio-engine/src/main/cpp/core/AuralTuneEQEngine.h</code></li>
+          <li><code>audio-engine/src/main/cpp/core/AuralTuneEQEngine.cpp</code></li>
+          <li><code>audio-engine/src/main/cpp/core/PcmConvert.h</code></li>
+          <li><code>audio-engine/src/main/cpp/jni/AudioEngineJNI.cpp</code></li>
+          <li><code>app/src/main/java/com/coreline/auraltune/audio/AuralTuneAudioProcessor.kt</code></li>
+        </ul>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
