@@ -144,12 +144,16 @@ fun GraphicEqCard(
                             )
                         }
                         presets.forEach { p ->
+                            val builtIn = com.coreline.auraltune.data.GraphicEqPresetCatalog.isBuiltInId(p.id)
                             DropdownMenuItem(
                                 text = { Text(p.name) },
                                 onClick = { presetMenuOpen = false; onLoadPreset(p.id) },
                                 trailingIcon = {
-                                    TextButton(onClick = { onDeletePreset(p.id) }) {
-                                        Text(stringResource(R.string.graphic_eq_delete))
+                                    // 내장 기본 프리셋은 삭제 버튼 없음(삭제 불가).
+                                    if (!builtIn) {
+                                        TextButton(onClick = { onDeletePreset(p.id) }) {
+                                            Text(stringResource(R.string.graphic_eq_delete))
+                                        }
                                     }
                                 },
                             )
@@ -364,7 +368,7 @@ internal fun eqSelectedButtonColors() = ButtonDefaults.outlinedButtonColors(
 )
 
 @Composable
-private fun eqSaveButtonColors() = ButtonDefaults.buttonColors(
+internal fun eqSaveButtonColors() = ButtonDefaults.buttonColors(
     containerColor = MaterialTheme.colorScheme.secondaryContainer,
     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
 )
@@ -382,7 +386,7 @@ internal fun eqOutlinedButtonColors() = ButtonDefaults.outlinedButtonColors(
 )
 
 @Composable
-private fun SavePresetDialog(
+internal fun SavePresetDialog(
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
 ) {

@@ -105,6 +105,12 @@ fun EqModeToggle(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             GainLimitButton(
+                label = stringResource(R.string.eq_mode_tone),
+                selected = mode == EqMode.TONE,
+                onClick = { onSelect(EqMode.TONE) },
+                modifier = Modifier.weight(1f),
+            )
+            GainLimitButton(
                 label = stringResource(R.string.eq_mode_graphic),
                 selected = mode == EqMode.GRAPHIC,
                 onClick = { onSelect(EqMode.GRAPHIC) },

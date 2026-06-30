@@ -46,6 +46,9 @@ import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Tune
@@ -98,6 +101,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.media3.common.Player
 import com.coreline.autoeq.model.CatalogState
 import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.AuralTuneApplication
@@ -411,10 +415,22 @@ private fun PlayerScreen(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        // 셔플(랜덤) — 이전곡 왼쪽
+                        IconButton(onClick = musicController::toggleShuffle, enabled = state.hasMedia) {
+                            Icon(
+                                Icons.Default.Shuffle,
+                                contentDescription = stringResource(
+                                    if (state.shuffleEnabled) R.string.player_shuffle_on else R.string.player_shuffle_off,
+                                ),
+                                tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
+                                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(8.dp))
                         IconButton(onClick = musicController::previous, enabled = state.hasMedia) {
                             Icon(Icons.Default.SkipPrevious, contentDescription = stringResource(R.string.player_prev))
                         }
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.width(12.dp))
                         FilledIconButton(
                             onClick = musicController::togglePlayPause,
                             enabled = state.hasMedia,
@@ -426,9 +442,27 @@ private fun PlayerScreen(
                                 modifier = Modifier.size(34.dp),
                             )
                         }
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.width(12.dp))
                         IconButton(onClick = musicController::next, enabled = state.hasMedia) {
                             Icon(Icons.Default.SkipNext, contentDescription = stringResource(R.string.player_next))
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        // 반복(한번만/전체/1곡) — 다음곡 오른쪽. 탭마다 OFF→ALL→ONE 순환.
+                        IconButton(onClick = musicController::cycleRepeatMode, enabled = state.hasMedia) {
+                            Icon(
+                                if (state.repeatMode == Player.REPEAT_MODE_ONE) Icons.Default.RepeatOne
+                                else Icons.Default.Repeat,
+                                contentDescription = stringResource(
+                                    when (state.repeatMode) {
+                                        Player.REPEAT_MODE_ONE -> R.string.player_repeat_one
+                                        Player.REPEAT_MODE_ALL -> R.string.player_repeat_all
+                                        else -> R.string.player_repeat_off
+                                    },
+                                ),
+                                tint = if (state.repeatMode == Player.REPEAT_MODE_OFF)
+                                       MaterialTheme.colorScheme.onSurfaceVariant
+                                       else MaterialTheme.colorScheme.primary,
+                            )
                         }
                     }
                 }
@@ -909,6 +943,9 @@ private fun CorrectionScreen(
     val autoEqAudible = listenMode != ListenMode.ORIGINAL
     val preampEnabled by vm.preampEnabled.collectAsState()
     val bandGains by vm.bandGains.collectAsState()
+    val toneGains by vm.toneGains.collectAsState()
+    val toneEqPresets by vm.toneEqPresets.collectAsState()
+    val selectedTonePresetId by vm.selectedToneEqPresetId.collectAsState()
     val eqPresets by vm.graphicEqPresets.collectAsState()
     val selectedPresetId by vm.selectedGraphicEqPresetId.collectAsState()
     val gainLimit by vm.gainLimitDb.collectAsState()
@@ -1225,6 +1262,23 @@ private fun CorrectionScreen(
                     onChangeQ = { id, q -> vm.updateParametricBand(id, q = q) },
                     onRemoveBand = vm::removeParametricBand,
                     onReset = vm::resetParametricEq,
+                )
+                EqMode.TONE -> ToneEqCard(
+                    toneGains = toneGains,
+                    manualSpecs = manualSpecs,
+                    autoEqFilters = autoFilters,
+                    presets = toneEqPresets,
+                    selectedPresetId = selectedTonePresetId,
+                    gainLimitDb = gainLimit,
+                    sampleRate = engineRateHz.toDouble(),
+                    preampDb = preamp,
+                    showPreamp = showPreamp,
+                    preampApplied = autoEqAudible && preampEnabled,
+                    onToneChange = vm::setToneGain,
+                    onSavePreset = vm::saveToneEqPreset,
+                    onLoadPreset = vm::loadToneEqPreset,
+                    onDeletePreset = vm::deleteToneEqPreset,
+                    onReset = vm::resetTone,
                 )
             }
         }

@@ -76,6 +76,24 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ----------------- Player: 반복/셔플 모드 -----------------
+    /** ExoPlayer repeatMode (0=OFF, 1=ONE, 2=ALL). 범위 밖 값은 OFF로 보정. */
+    val repeatMode: Flow<Int> =
+        store.data.map { prefs ->
+            val m = prefs[KEY_REPEAT_MODE] ?: DEFAULT_REPEAT_MODE
+            if (m in 0..2) m else DEFAULT_REPEAT_MODE
+        }
+    suspend fun setRepeatMode(mode: Int) {
+        store.edit { it[KEY_REPEAT_MODE] = if (mode in 0..2) mode else DEFAULT_REPEAT_MODE }
+    }
+
+    /** 셔플(랜덤) 재생 여부. */
+    val shuffleEnabled: Flow<Boolean> =
+        store.data.map { it[KEY_SHUFFLE_ENABLED] ?: DEFAULT_SHUFFLE_ENABLED }
+    suspend fun setShuffleEnabled(enabled: Boolean) {
+        store.edit { it[KEY_SHUFFLE_ENABLED] = enabled }
+    }
+
     // ----------------- Selected profile -----------------
     val selectedProfileId: Flow<String?> = store.data.map { it[KEY_SELECTED_PROFILE_ID] }
     suspend fun setSelectedProfileId(id: String?) {
@@ -229,6 +247,47 @@ class SettingsStore(context: Context) {
             val current = prefs[KEY_GEQ_PRESETS]?.let { decodePresets(it) }.orEmpty()
             prefs[KEY_GEQ_PRESETS] = encodePresets(current.filter { it.id != id })
             if (prefs[KEY_SELECTED_GEQ_PRESET] == id) prefs.remove(KEY_SELECTED_GEQ_PRESET)
+        }
+    }
+
+    // ----------------- Tone EQ (Bass/Mid/Treble) -----------------
+    /** 3-band tone gains [bass, mid, treble] in dB. Always normalized to length 3. */
+    val toneGains: Flow<FloatArray> =
+        store.data.map { prefs -> prefs[KEY_TONE_GAINS]?.let { decodeTone(it) } ?: FloatArray(TONE_BANDS) }
+    suspend fun setToneGains(gains: FloatArray) {
+        store.edit { it[KEY_TONE_GAINS] = encodeTone(gains) }
+    }
+
+    // ----------------- Tone EQ: named presets -----------------
+    /** User-saved tone presets. Built-in starting points live in [ToneEqPresetCatalog]. */
+    val userToneEqPresets: Flow<List<ToneEqPreset>> =
+        store.data.map { prefs -> prefs[KEY_TONE_PRESETS]?.let { decodeTonePresets(it) } ?: emptyList() }
+
+    val selectedToneEqPresetId: Flow<String?> =
+        store.data.map { it[KEY_SELECTED_TONE_PRESET] }
+
+    suspend fun setSelectedToneEqPresetId(id: String?) {
+        store.edit { prefs ->
+            if (id == null) prefs.remove(KEY_SELECTED_TONE_PRESET) else prefs[KEY_SELECTED_TONE_PRESET] = id
+        }
+    }
+
+    /** Insert/replace a user tone preset (gains normalized to length 3; built-in ids rejected). */
+    suspend fun upsertToneEqPreset(preset: ToneEqPreset) {
+        if (ToneEqPresetCatalog.isBuiltInId(preset.id)) return
+        store.edit { prefs ->
+            val current = prefs[KEY_TONE_PRESETS]?.let { decodeTonePresets(it) }.orEmpty()
+            val normalized = preset.copy(gainsDb = normalizeTone(preset.gainsDb.toFloatArray()).toList())
+            val updated = current.filter { it.id != preset.id } + normalized
+            prefs[KEY_TONE_PRESETS] = encodeTonePresets(updated)
+        }
+    }
+
+    suspend fun deleteToneEqPreset(id: String) {
+        store.edit { prefs ->
+            val current = prefs[KEY_TONE_PRESETS]?.let { decodeTonePresets(it) }.orEmpty()
+            prefs[KEY_TONE_PRESETS] = encodeTonePresets(current.filter { it.id != id })
+            if (prefs[KEY_SELECTED_TONE_PRESET] == id) prefs.remove(KEY_SELECTED_TONE_PRESET)
         }
     }
 
@@ -452,7 +511,38 @@ class SettingsStore(context: Context) {
         }
     }
 
+    private fun encodeTone(gains: FloatArray): String =
+        json.encodeToString(gainsSerializer, normalizeTone(gains).toList())
+
+    private fun decodeTone(raw: String): FloatArray =
+        runCatching { normalizeTone(json.decodeFromString(gainsSerializer, raw).toFloatArray()) }
+            .getOrElse { FloatArray(TONE_BANDS) }
+
+    /** Fix length to [TONE_BANDS], drop NaN/Inf → 0, clamp to the absolute graphic ceiling. */
+    private fun normalizeTone(gains: FloatArray): FloatArray {
+        val max = GraphicEqBands.MAX_GAIN_LIMIT_DB
+        return FloatArray(TONE_BANDS) { i ->
+            val v = gains.getOrElse(i) { 0f }
+            if (v.isFinite()) v.coerceIn(-max, max) else 0f
+        }
+    }
+
+    private fun encodeTonePresets(list: List<ToneEqPreset>): String =
+        json.encodeToString(
+            toneEqPresetSerializer,
+            list.map { it.copy(gainsDb = normalizeTone(it.gainsDb.toFloatArray()).toList()) },
+        )
+
+    private fun decodeTonePresets(raw: String): List<ToneEqPreset> =
+        runCatching {
+            json.decodeFromString(toneEqPresetSerializer, raw)
+                .map { it.copy(gainsDb = normalizeTone(it.gainsDb.toFloatArray()).toList()) }
+                .filter { !ToneEqPresetCatalog.isBuiltInId(it.id) }
+        }.getOrElse { emptyList() }
+
     companion object {
+        /** Tone EQ band count: [bass, mid, treble]. */
+        const val TONE_BANDS = 3
         const val LISTEN_ORIGINAL = "ORIGINAL"
         const val LISTEN_AUTOEQ = "AUTOEQ"
         const val LISTEN_USER = "USER"
@@ -461,6 +551,8 @@ class SettingsStore(context: Context) {
         const val DEFAULT_PREAMP_ENABLED = true
         const val DEFAULT_KILL_SWITCH_ENGAGED = false
         const val DEFAULT_SHOW_PREAMP = true
+        const val DEFAULT_REPEAT_MODE = 0 // Player.REPEAT_MODE_OFF
+        const val DEFAULT_SHUFFLE_ENABLED = false
 
         private val KEY_SELECTED_PROFILE_ID = stringPreferencesKey("selected_profile_id")
         private val KEY_AUTOEQ_ENABLED = booleanPreferencesKey("autoeq_enabled")
@@ -484,9 +576,14 @@ class SettingsStore(context: Context) {
         private val KEY_RECENT_OPRA = stringPreferencesKey("recent_opra_profiles_json")
         private val KEY_OPRA_PARSER_VERSION = intPreferencesKey("opra_parser_version")
         private val KEY_PLAYBACK_SNAPSHOT = stringPreferencesKey("playback_snapshot_json")
+        private val KEY_REPEAT_MODE = intPreferencesKey("playback_repeat_mode")
+        private val KEY_SHUFFLE_ENABLED = booleanPreferencesKey("playback_shuffle_enabled")
         private val KEY_EQ_MODE = stringPreferencesKey("eq_mode")
         private val KEY_GEQ_Q_SCALE = floatPreferencesKey("graphic_eq_q_scale")
         private val KEY_PARAMETRIC_BANDS = stringPreferencesKey("parametric_bands_json")
+        private val KEY_TONE_GAINS = stringPreferencesKey("tone_gains_json")
+        private val KEY_TONE_PRESETS = stringPreferencesKey("tone_presets_json")
+        private val KEY_SELECTED_TONE_PRESET = stringPreferencesKey("tone_selected_preset_id")
         private val KEY_PARAMETRIC_PRESETS = stringPreferencesKey("parametric_presets_json")
         private val KEY_SELECTED_PARAMETRIC_PRESET = stringPreferencesKey("parametric_selected_preset_id")
         private val KEY_SELECTED_PARAMETRIC_PRESET_SOURCE = stringPreferencesKey("parametric_selected_preset_source")
@@ -511,6 +608,7 @@ class SettingsStore(context: Context) {
         private val recentOpraSerializer = ListSerializer(RecentOpraProfile.serializer())
         private val parametricSerializer = ListSerializer(ParametricBand.serializer())
         private val parametricPresetSerializer = ListSerializer(ParametricEqPreset.serializer())
+        private val toneEqPresetSerializer = ListSerializer(ToneEqPreset.serializer())
     }
 }
 

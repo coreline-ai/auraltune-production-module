@@ -27,6 +27,7 @@ import com.coreline.auraltune.data.SettingsStore
 import com.coreline.auraltune.audio.eq.BiquadSpec
 import com.coreline.auraltune.audio.eq.BiquadType
 import com.coreline.auraltune.audio.eq.EqMode
+import com.coreline.auraltune.audio.eq.biquadTypeFromNativeId
 import com.coreline.auraltune.audio.eq.GraphicEqBands
 import com.coreline.auraltune.audio.eq.toNativeId
 import com.coreline.auraltune.audio.eq.updateParametricBandModel
@@ -75,6 +76,10 @@ class AutoEqViewModel(
     private val importedProfileFallback = application.getString(R.string.imported_profile_fallback)
     private val importedSourceLabel = application.getString(R.string.imported_source_label)
     private val builtInParametricPresets = ParametricPresetCatalog.builtIns(application)
+    private val builtInGraphicPresets =
+        com.coreline.auraltune.data.GraphicEqPresetCatalog.builtIns(application)
+    private val builtInTonePresets =
+        com.coreline.auraltune.data.ToneEqPresetCatalog.builtIns(application)
 
     /** Exposed so the screen can drive local music playback (T1). Owned/closed here. */
     val musicController: MusicPlayerController = MusicPlayerController(app, engine, settings)
@@ -215,15 +220,31 @@ class AutoEqViewModel(
             viewModelScope, SharingStarted.Eagerly, GraphicEqBands.MAX_GAIN_DB,
         )
 
+    /** 톤 EQ 게인 [베이스, 미드, 트레블] (dB). 슬라이더가 변경, debounce 후 적용·영속. */
+    private val _toneGains = MutableStateFlow(FloatArray(SettingsStore.TONE_BANDS))
+    val toneGains: StateFlow<FloatArray> = _toneGains.asStateFlow()
+
+    /** 톤 EQ 프리셋 = 내장 기본 + 사용자 저장(내장이 위, debug·release 공통). */
+    val toneEqPresets: StateFlow<List<com.coreline.auraltune.data.ToneEqPreset>> =
+        settings.userToneEqPresets
+            .map { user -> builtInTonePresets + user }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, builtInTonePresets)
+
+    /** 현재 선택된 톤 프리셋 id(없으면 null). 슬라이더를 임의 변경하면 해제(dirty). */
+    val selectedToneEqPresetId: StateFlow<String?> =
+        settings.selectedToneEqPresetId.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     /** 응답 그래프에 활성 프로파일 preamp 기준선을 표시할지. */
     val showPreampOnGraph: StateFlow<Boolean> =
         settings.showPreampOnGraph.stateIn(
             viewModelScope, SharingStarted.Eagerly, SettingsStore.DEFAULT_SHOW_PREAMP,
         )
 
-    /** 저장된 그래픽 EQ 프리셋 목록(이름 있는). */
+    /** 그래픽 EQ 프리셋 = 내장 기본 프리셋 + 사용자 저장(내장이 위, debug·release 공통). */
     val graphicEqPresets: StateFlow<List<com.coreline.auraltune.data.GraphicEqPreset>> =
-        settings.graphicEqPresets.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        settings.graphicEqPresets
+            .map { user -> builtInGraphicPresets + user }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, builtInGraphicPresets)
 
     /** 현재 선택된 프리셋 id(없으면 null). 슬라이더를 임의 변경하면 해제된다(dirty). */
     val selectedGraphicEqPresetId: StateFlow<String?> =
@@ -274,8 +295,8 @@ class AutoEqViewModel(
      * combine이 모드·게인·Q배율·밴드 중 하나라도 바뀌면 재계산한다.
      */
     val manualResponseSpecs: StateFlow<List<BiquadSpec>> =
-        combine(eqMode, _bandGains, graphicQScale, _parametricBands) { mode, gains, qScale, bands ->
-            currentManualSpecs(mode, gains, qScale, bands)
+        combine(eqMode, _bandGains, graphicQScale, _parametricBands, _toneGains) { mode, gains, qScale, bands, tone ->
+            currentManualSpecs(mode, gains, qScale, bands, tone)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /**
@@ -433,9 +454,11 @@ class AutoEqViewModel(
             _bandGains.value = clampToLimit(settings.currentGraphicEqGains.first(), limit)
             _parametricBands.value = settings.parametricBands.first()
                 .map { it.normalized() }.take(ParametricBand.MAX_BANDS)
+            _toneGains.value = clampTone(settings.toneGains.first(), limit)
             // 복원 완료 후에만 영속화 시작 — debounce(400ms)로 DataStore 쓰기 빈도를 낮춘다.
             launch { _bandGains.debounce(400L).collect { gains -> settings.setCurrentGraphicEqGains(gains) } }
             launch { _parametricBands.debounce(400L).collect { bands -> settings.setParametricBands(bands) } }
+            launch { _toneGains.debounce(400L).collect { tone -> settings.setToneGains(tone) } }
         }
         // 사용자 EQ 변경(그래픽/파라메트릭/Q배율/모드) → debounce(40ms) → Manual chain 적용.
         viewModelScope.launch {
@@ -497,45 +520,13 @@ class AutoEqViewModel(
             val seed = SEED_PROFILE_NAMES.mapNotNull { name -> pickPreferredEntry(byName[name.lowercase().trim()]) }
             settings.seedRecentProfilesIfEmpty(seed)
         }
-        // 디버그 빌드 전용: 그래픽 EQ 테스트 프리셋 3종을 보장(고정 id라 매 실행 upsert해도 중복 없음).
-        if (BuildConfig.DEBUG) {
-            viewModelScope.launch { seedTestPresets() }
+        // 레거시 디버그 테스트 프리셋(이제 내장 카탈로그로 대체)을 정리 — 이전 빌드 설치본의 중복 제거.
+        viewModelScope.launch {
+            listOf("test-bass-boost", "test-v-shape", "test-treble-cut")
+                .forEach { settings.deleteGraphicEqPreset(it) }
         }
     }
 
-    /**
-     * DEBUG 전용 테스트 프리셋 3종(저음 부스트 / V자 / 고음 컷)을 고정 id로 upsert.
-     * 고정 id라 매 실행해도 중복되지 않고, 사용자 프리셋(랜덤 UUID)과 충돌하지 않는다.
-     * (사용자가 삭제해도 다음 실행에 다시 생김 — 테스트 픽스처 용도.)
-     */
-    private suspend fun seedTestPresets() {
-        val now = System.currentTimeMillis()
-        fun gains(vararg v: Float): List<Float> =
-            FloatArray(GraphicEqBands.COUNT) { i -> v.getOrElse(i) { 0f } }.toList()
-        listOf(
-            GraphicEqPreset(
-                id = "test-bass-boost",
-                name = "테스트 · 저음 부스트",
-                gainsDb = gains(8f, 8f, 7f, 6f, 5f, 4f, 3f, 2f, 1f),
-                createdAtMs = now,
-                updatedAtMs = now,
-            ),
-            GraphicEqPreset(
-                id = "test-v-shape",
-                name = "테스트 · V자",
-                gainsDb = gains(6f, 6f, 5f, 4f, 2f, 0f, -2f, -3f, -4f, -4f, -3f, -2f, 0f, 2f, 3f, 4f, 5f, 6f, 6f, 6f),
-                createdAtMs = now,
-                updatedAtMs = now,
-            ),
-            GraphicEqPreset(
-                id = "test-treble-cut",
-                name = "테스트 · 고음 컷",
-                gainsDb = gains(0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, -1f, -2f, -3f, -4f, -5f, -6f, -7f, -8f, -8f),
-                createdAtMs = now,
-                updatedAtMs = now,
-            ),
-        ).forEach { settings.upsertGraphicEqPreset(it) }
-    }
 
     /** 슬라이더 → 밴드 게인 설정(현재 선택 한계로 clamp). 적용은 debounce 흐름이 담당. */
     fun setBandGain(index: Int, gainDb: Float) {
@@ -567,11 +558,16 @@ class AutoEqViewModel(
             b.copy(gainDb = b.gainDb.coerceIn(-snapped, snapped))
         }
         val bandsChanged = clampedBands != curBands
+        // 톤 3밴드도 동일 규칙으로 새 한계에 재클램프.
+        val curTone = _toneGains.value
+        val clampedTone = clampTone(curTone, snapped)
+        val toneChanged = !clampedTone.contentEquals(curTone)
         viewModelScope.launch {
-            // 한계와 (clamp된) 게인/밴드를 함께 즉시 기록 — 저장 지연 차이로 인한 불일치 제거.
+            // 한계와 (clamp된) 게인/밴드/톤을 함께 즉시 기록 — 저장 지연 차이로 인한 불일치 제거.
             settings.setGraphicEqGainLimitDb(snapped)
             clamped?.let { settings.setCurrentGraphicEqGains(it) }
             if (bandsChanged) settings.setParametricBands(clampedBands)
+            if (toneChanged) settings.setToneGains(clampedTone)
         }
         if (clamped != null) {
             _bandGains.value = clamped
@@ -581,11 +577,19 @@ class AutoEqViewModel(
             _parametricBands.value = clampedBands
             markParametricPresetDirty()
         }
+        if (toneChanged) _toneGains.value = clampedTone
     }
 
     /** 게인 배열을 ±limit로 clamp(NaN/Inf → 0). [_bandGains]가 항상 라이브 한계 내에 있도록 보장. */
     private fun clampToLimit(gains: FloatArray, limit: Float): FloatArray =
         FloatArray(GraphicEqBands.COUNT) { i ->
+            val v = gains.getOrElse(i) { 0f }
+            if (v.isFinite()) v.coerceIn(-limit, limit) else 0f
+        }
+
+    /** 톤 3밴드를 ±limit로 clamp(NaN/Inf → 0, 길이 3 보장). */
+    private fun clampTone(gains: FloatArray, limit: Float): FloatArray =
+        FloatArray(SettingsStore.TONE_BANDS) { i ->
             val v = gains.getOrElse(i) { 0f }
             if (v.isFinite()) v.coerceIn(-limit, limit) else 0f
         }
@@ -599,6 +603,24 @@ class AutoEqViewModel(
     fun resetGraphicEq() {
         _bandGains.value = FloatArray(GraphicEqBands.COUNT)
         markGraphicEqPresetDirty()
+    }
+
+    /** 톤 밴드 게인 설정(0=베이스,1=미드,2=트레블). 라이브 한계로 clamp + '내 설정'으로 자동 전환. */
+    fun setToneGain(index: Int, gainDb: Float) {
+        if (index !in 0 until SettingsStore.TONE_BANDS) return
+        val arr = _toneGains.value.let { if (it.size == SettingsStore.TONE_BANDS) it.copyOf() else FloatArray(SettingsStore.TONE_BANDS) }
+        val limit = gainLimitDb.value
+        arr[index] = if (gainDb.isFinite()) gainDb.coerceIn(-limit, limit) else 0f
+        _toneGains.value = arr
+        markToneEqPresetDirty()
+        // 톤을 만지면 편집 결과가 즉시 들리도록 '내 설정' 청취 모드로 전환.
+        if (listenMode.value != ListenMode.USER) setListenMode(ListenMode.USER)
+    }
+
+    /** 톤 3밴드 0dB로 리셋. */
+    fun resetTone() {
+        _toneGains.value = FloatArray(SettingsStore.TONE_BANDS)
+        markToneEqPresetDirty()
     }
 
     /** 현재 게인을 이름 있는 프리셋으로 저장하고 선택 상태로 표시. */
@@ -625,7 +647,45 @@ class AutoEqViewModel(
     }
 
     fun deleteGraphicEqPreset(id: String) {
+        // 내장 기본 프리셋은 삭제 불가(사용자 저장 프리셋만 삭제).
+        if (com.coreline.auraltune.data.GraphicEqPresetCatalog.isBuiltInId(id)) return
         viewModelScope.launch { settings.deleteGraphicEqPreset(id) }
+    }
+
+    /** 현재 톤 게인을 이름 있는 사용자 프리셋으로 저장 + 선택 표시. */
+    fun saveToneEqPreset(name: String) {
+        val now = System.currentTimeMillis()
+        val preset = com.coreline.auraltune.data.ToneEqPreset(
+            id = java.util.UUID.randomUUID().toString(),
+            name = name.trim().ifBlank { "프리셋" },
+            gainsDb = _toneGains.value.toList(),
+            createdAtMs = now,
+            updatedAtMs = now,
+        )
+        viewModelScope.launch {
+            settings.upsertToneEqPreset(preset)
+            settings.setSelectedToneEqPresetId(preset.id)
+        }
+    }
+
+    /** 톤 프리셋 불러오기: 3게인 적용(라이브 한계 clamp) + 선택 표시. */
+    fun loadToneEqPreset(id: String) {
+        val preset = toneEqPresets.value.firstOrNull { it.id == id } ?: return
+        _toneGains.value = clampTone(preset.gainsDb.toFloatArray(), gainLimitDb.value)
+        viewModelScope.launch { settings.setSelectedToneEqPresetId(id) }
+    }
+
+    fun deleteToneEqPreset(id: String) {
+        // 내장 기본 프리셋은 삭제 불가.
+        if (com.coreline.auraltune.data.ToneEqPresetCatalog.isBuiltInId(id)) return
+        viewModelScope.launch { settings.deleteToneEqPreset(id) }
+    }
+
+    /** 톤 슬라이더를 직접 바꾸면 선택 프리셋과 달라지므로 선택 해제(dirty). */
+    private fun markToneEqPresetDirty() {
+        if (selectedToneEqPresetId.value != null) {
+            viewModelScope.launch { settings.setSelectedToneEqPresetId(null) }
+        }
     }
 
     /** 사용자가 밴드를 직접 바꾸면 선택된 프리셋과 달라지므로 선택을 해제(dirty). */
@@ -640,7 +700,7 @@ class AutoEqViewModel(
     /** EQ 편집 모드 전환. 전환 후 그 모드의 결과가 들리도록(비평탄) USER 청취 모드로 보장. */
     fun setEqMode(mode: EqMode) {
         viewModelScope.launch { settings.setEqMode(mode.name) }
-        val specs = currentManualSpecs(mode, _bandGains.value, graphicQScale.value, _parametricBands.value)
+        val specs = currentManualSpecs(mode, _bandGains.value, graphicQScale.value, _parametricBands.value, _toneGains.value)
         if (specs.isNotEmpty()) ensureUserListenMode()
     }
 
@@ -814,12 +874,29 @@ class AutoEqViewModel(
         gains: FloatArray,
         qScale: Float,
         bands: List<ParametricBand>,
+        tone: FloatArray,
     ): List<BiquadSpec> = when (mode) {
+        EqMode.TONE -> toneSpecs(tone)
         EqMode.GRAPHIC -> GraphicEqBands.toSpecs(gains, qScale)
         EqMode.PARAMETRIC -> bands.mapNotNull { b ->
             val spec = b.toBiquadSpec()
             if (spec.type == BiquadType.HIGH_PASS || kotlin.math.abs(spec.gainDb) >= 0.05) spec else null
         }
+    }
+
+    /**
+     * 톤 3밴드 → Manual chain 스펙. 베이스(로우셸프 100Hz) · 미드(피킹 1kHz) · 트레블(하이셸프 10kHz).
+     * 게인≈0 밴드는 제외(무음 0dB 필터 방지). 주파수/Q는 고정값.
+     */
+    private fun toneSpecs(tone: FloatArray): List<BiquadSpec> {
+        fun band(nativeId: Int, hz: Double, q: Double, db: Float): BiquadSpec? =
+            if (kotlin.math.abs(db) < 0.05f) null
+            else BiquadSpec(biquadTypeFromNativeId(nativeId), hz, db.toDouble(), q)
+        return listOfNotNull(
+            band(1, 100.0, 0.70, tone.getOrElse(0) { 0f }),    // Low Shelf — Bass
+            band(0, 1_000.0, 0.90, tone.getOrElse(1) { 0f }),  // Peaking — Mid
+            band(2, 10_000.0, 0.70, tone.getOrElse(2) { 0f }), // High Shelf — Treble
+        )
     }
 
     /**

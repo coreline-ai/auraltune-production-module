@@ -59,6 +59,9 @@ data class PlaybackUiState(
     val audioBitDepth: Int? = null,
     val audioSampleRateHz: Int? = null,
     val playbackError: String? = null,
+    /** ExoPlayer repeatMode: REPEAT_MODE_OFF(0) / ONE(1) / ALL(2). */
+    val repeatMode: Int = Player.REPEAT_MODE_OFF,
+    val shuffleEnabled: Boolean = false,
 )
 
 @UnstableApi
@@ -137,6 +140,8 @@ class MusicPlayerController(
                         new: Player.PositionInfo,
                         reason: Int,
                     ) = publish()
+                    override fun onRepeatModeChanged(repeatMode: Int) = publish()
+                    override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) = publish()
                 })
             }
     }
@@ -145,6 +150,12 @@ class MusicPlayerController(
         analyzer.start()
         // 앱 재시작 시 마지막 큐/현재 곡/위치를 복원(자동 재생 없이 '일시정지'로 노출).
         restore()
+        // 저장된 반복/셔플 모드를 player에 적용(큐 유무와 무관, 메인스레드).
+        scope.launch {
+            player.repeatMode = settings.repeatMode.first()
+            player.shuffleModeEnabled = settings.shuffleEnabled.first()
+            publish()
+        }
     }
 
     // ── Queue / transport ──────────────────────────────────────────────────────
@@ -221,6 +232,26 @@ class MusicPlayerController(
     fun seekTo(ms: Long) { player.seekTo(ms.coerceAtLeast(0L)); publish() }
     fun stop() { player.stop() }
 
+    /** 반복 모드 순환: 한번만(OFF) → 전체(ALL) → 1곡(ONE) → 한번만. 영속한다. */
+    fun cycleRepeatMode() {
+        val next = when (player.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+        player.repeatMode = next
+        scope.launch { settings.setRepeatMode(next) }
+        publish()
+    }
+
+    /** 셔플(랜덤) 토글. 영속한다. */
+    fun toggleShuffle() {
+        val next = !player.shuffleModeEnabled
+        player.shuffleModeEnabled = next
+        scope.launch { settings.setShuffleEnabled(next) }
+        publish()
+    }
+
     fun consumePlaybackError() {
         if (_state.value.playbackError != null) {
             _state.value = _state.value.copy(playbackError = null)
@@ -242,9 +273,10 @@ class MusicPlayerController(
         }
         when (player.playbackState) {
             Player.STATE_IDLE -> { player.prepare(); player.playWhenReady = true }
-            Player.STATE_ENDED -> { player.seekTo(0, 0L); player.playWhenReady = true }
+            // 큐 0번이 아니라 '현재 곡'을 처음부터(seekTo(0L) = 현재 미디어아이템 0초).
+            Player.STATE_ENDED -> { player.seekTo(0L); player.playWhenReady = true }
             else -> { // STATE_READY
-                if (isAtEnd()) player.seekTo(0, 0L) // 끝에서 멈춘 트랙을 다시 누르면 처음부터
+                if (isAtEnd()) player.seekTo(0L) // 끝에서 멈춘 '현재 곡'을 다시 누르면 처음부터
                 player.play()
             }
         }
@@ -266,7 +298,7 @@ class MusicPlayerController(
         if (!pendingPlayRequest) return
         if (playbackState != Player.STATE_READY && playbackState != Player.STATE_ENDED) return
         pendingPlayRequest = false
-        if (playbackState == Player.STATE_ENDED || isAtEnd()) player.seekTo(0, 0L)
+        if (playbackState == Player.STATE_ENDED || isAtEnd()) player.seekTo(0L) // 현재 곡 처음부터
         player.play()
         publish()
     }
@@ -320,6 +352,8 @@ class MusicPlayerController(
             audioBitDepth = currentAudioBitDepth,
             audioSampleRateHz = currentAudioSampleRateHz,
             playbackError = playbackError,
+            repeatMode = player.repeatMode,
+            shuffleEnabled = player.shuffleModeEnabled,
         )
     }
 
