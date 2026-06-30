@@ -643,6 +643,7 @@ class AutoEqViewModel(
     fun loadGraphicEqPreset(id: String) {
         val preset = graphicEqPresets.value.firstOrNull { it.id == id } ?: return
         _bandGains.value = clampToLimit(preset.gainsDb.toFloatArray(), gainLimitDb.value)
+        ensureUserListenMode() // 프리셋을 불러오면 즉시 '내 설정'으로 전환되어 들리게(파라메트릭과 동일).
         viewModelScope.launch { settings.setSelectedGraphicEqPresetId(id) }
     }
 
@@ -672,6 +673,7 @@ class AutoEqViewModel(
     fun loadToneEqPreset(id: String) {
         val preset = toneEqPresets.value.firstOrNull { it.id == id } ?: return
         _toneGains.value = clampTone(preset.gainsDb.toFloatArray(), gainLimitDb.value)
+        ensureUserListenMode() // 프리셋을 불러오면 즉시 '내 설정'으로 전환되어 들리게(파라메트릭과 동일).
         viewModelScope.launch { settings.setSelectedToneEqPresetId(id) }
     }
 
