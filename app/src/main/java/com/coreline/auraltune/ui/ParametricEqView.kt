@@ -10,6 +10,7 @@ package com.coreline.auraltune.ui
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,9 +23,12 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Save
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -32,9 +36,11 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +68,8 @@ import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.eq.BiquadResponse
 import com.coreline.auraltune.audio.eq.EqMode
 import com.coreline.auraltune.data.ParametricBand
+import com.coreline.auraltune.data.ParametricEqPreset
+import com.coreline.auraltune.data.ParametricPresetSource
 import com.coreline.autoeq.model.AutoEqFilter
 import java.util.Locale
 import kotlin.math.abs
@@ -122,9 +130,16 @@ fun EqModeToggle(
 fun ParametricEqCard(
     bands: List<ParametricBand>,
     selectedId: String?,
+    presets: List<ParametricEqPreset>,
+    selectedPresetId: String?,
+    selectedPresetSource: ParametricPresetSource?,
+    presetDirty: Boolean,
     autoEqFilters: List<AutoEqFilter>,
     gainLimitDb: Float,
     sampleRate: Double,
+    onApplyPreset: (String, ParametricPresetSource) -> Unit,
+    onSavePreset: (String) -> Unit,
+    onDeleteUserPreset: (String) -> Unit,
     onAddBand: () -> Unit,
     onSelectBand: (String?) -> Unit,
     onDragBand: (String, Float, Float) -> Unit,
@@ -134,6 +149,7 @@ fun ParametricEqCard(
     onReset: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var showSaveDialog by remember { mutableStateOf(false) }
     AuralTunePanel(modifier = modifier, elevated = true) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -148,6 +164,29 @@ fun ParametricEqCard(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            Spacer(Modifier.height(10.dp))
+
+            ParametricPresetPicker(
+                presets = presets,
+                selectedPresetId = selectedPresetId,
+                selectedPresetSource = selectedPresetSource,
+                presetDirty = presetDirty,
+                hasBands = bands.isNotEmpty(),
+                onApplyPreset = onApplyPreset,
+                onSavePreset = { showSaveDialog = true },
+                onDeleteUserPreset = onDeleteUserPreset,
+            )
+
+            if (showSaveDialog) {
+                SaveParametricPresetDialog(
+                    onConfirm = { name ->
+                        showSaveDialog = false
+                        onSavePreset(name)
+                    },
+                    onDismiss = { showSaveDialog = false },
+                )
+            }
+
             Spacer(Modifier.height(10.dp))
 
             ParametricGraphEditor(
@@ -225,6 +264,187 @@ fun ParametricEqCard(
             }
         }
     }
+}
+
+@Composable
+private fun ParametricPresetPicker(
+    presets: List<ParametricEqPreset>,
+    selectedPresetId: String?,
+    selectedPresetSource: ParametricPresetSource?,
+    presetDirty: Boolean,
+    hasBands: Boolean,
+    onApplyPreset: (String, ParametricPresetSource) -> Unit,
+    onSavePreset: () -> Unit,
+    onDeleteUserPreset: (String) -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var selectedCategory by remember(presets) { mutableStateOf<String?>(null) }
+    val categories = remember(presets) { presets.map { it.category }.distinct() }
+    val selectedPreset = presets.firstOrNull {
+        it.id == selectedPresetId && it.source == selectedPresetSource
+    }
+    val statusLabel = when {
+        selectedPreset != null && presetDirty ->
+            stringResource(R.string.parametric_preset_status_modified, selectedPreset.name)
+        selectedPreset != null -> selectedPreset.name
+        hasBands -> stringResource(R.string.parametric_preset_status_custom)
+        else -> stringResource(R.string.parametric_preset_pick_placeholder)
+    }
+    val filtered = if (selectedCategory == null) presets else presets.filter { it.category == selectedCategory }
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            stringResource(R.string.parametric_preset_starting_point),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.outline,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            GainLimitButton(
+                label = stringResource(R.string.parametric_preset_category_recommended),
+                selected = selectedCategory == null,
+                onClick = { selectedCategory = null },
+            )
+            categories.forEach { category ->
+                GainLimitButton(
+                    label = category,
+                    selected = selectedCategory == category,
+                    onClick = { selectedCategory = category },
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    shape = MaterialTheme.shapes.medium,
+                    border = eqButtonBorder(selected = selectedPreset != null && !presetDirty),
+                    colors = if (selectedPreset != null && !presetDirty) {
+                        eqSelectedButtonColors()
+                    } else {
+                        eqOutlinedButtonColors()
+                    },
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        statusLabel,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = stringResource(R.string.parametric_preset_open),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (filtered.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.parametric_preset_empty)) },
+                            onClick = {},
+                            enabled = false,
+                        )
+                    }
+                    filtered.forEach { preset ->
+                        DropdownMenuItem(
+                            text = {
+                                Column {
+                                    Text(preset.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(
+                                        if (preset.source == ParametricPresetSource.BUILT_IN) {
+                                            stringResource(R.string.parametric_preset_source_builtin)
+                                        } else {
+                                            stringResource(R.string.parametric_preset_source_user)
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            onClick = {
+                                menuOpen = false
+                                onApplyPreset(preset.id, preset.source)
+                            },
+                            trailingIcon = if (preset.source == ParametricPresetSource.USER) {
+                                {
+                                    TextButton(onClick = { onDeleteUserPreset(preset.id) }) {
+                                        Text(stringResource(R.string.graphic_eq_delete))
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                        )
+                    }
+                }
+            }
+            Button(
+                onClick = onSavePreset,
+                enabled = hasBands,
+                modifier = Modifier.height(40.dp),
+                shape = MaterialTheme.shapes.medium,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Save,
+                    contentDescription = stringResource(R.string.parametric_preset_save),
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.graphic_eq_save), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(R.string.parametric_preset_caption),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun SaveParametricPresetDialog(
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.parametric_preset_save_title)) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                singleLine = true,
+                label = { Text(stringResource(R.string.graphic_eq_preset_name)) },
+            )
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name) },
+                enabled = name.isNotBlank(),
+            ) { Text(stringResource(R.string.graphic_eq_save)) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.common_cancel)) } },
+    )
 }
 
 /** Small legend under the graph: solid = 내 EQ, dashed = 프로파일(있을 때만), dot = 밴드. */

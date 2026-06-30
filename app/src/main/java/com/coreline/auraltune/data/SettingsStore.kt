@@ -262,6 +262,72 @@ class SettingsStore(context: Context) {
         }
     }
 
+    // ----------------- Parametric EQ: starting-point + user presets -----------------
+    /** User-saved parametric presets. Built-in starting points live in [ParametricPresetCatalog]. */
+    val userParametricEqPresets: Flow<List<ParametricEqPreset>> =
+        store.data.map { prefs ->
+            prefs[KEY_PARAMETRIC_PRESETS]?.let { decodeParametricPresets(it) } ?: emptyList()
+        }
+
+    val selectedParametricPresetId: Flow<String?> =
+        store.data.map { it[KEY_SELECTED_PARAMETRIC_PRESET] }
+
+    val selectedParametricPresetSource: Flow<ParametricPresetSource?> =
+        store.data.map { prefs -> ParametricPresetSource.fromKey(prefs[KEY_SELECTED_PARAMETRIC_PRESET_SOURCE]) }
+
+    val parametricPresetDirty: Flow<Boolean> =
+        store.data.map { it[KEY_PARAMETRIC_PRESET_DIRTY] ?: false }
+
+    suspend fun setSelectedParametricPreset(
+        id: String?,
+        source: ParametricPresetSource?,
+        dirty: Boolean,
+    ) {
+        store.edit { prefs ->
+            if (id == null || source == null) {
+                prefs.remove(KEY_SELECTED_PARAMETRIC_PRESET)
+                prefs.remove(KEY_SELECTED_PARAMETRIC_PRESET_SOURCE)
+                prefs.remove(KEY_PARAMETRIC_PRESET_DIRTY)
+            } else {
+                prefs[KEY_SELECTED_PARAMETRIC_PRESET] = id
+                prefs[KEY_SELECTED_PARAMETRIC_PRESET_SOURCE] = source.name
+                prefs[KEY_PARAMETRIC_PRESET_DIRTY] = dirty
+            }
+        }
+    }
+
+    suspend fun setParametricPresetDirty(dirty: Boolean) {
+        store.edit { prefs ->
+            if (prefs[KEY_SELECTED_PARAMETRIC_PRESET] != null) {
+                prefs[KEY_PARAMETRIC_PRESET_DIRTY] = dirty
+            }
+        }
+    }
+
+    suspend fun upsertParametricEqPreset(preset: ParametricEqPreset) {
+        store.edit { prefs ->
+            val current = prefs[KEY_PARAMETRIC_PRESETS]?.let { decodeParametricPresets(it) }.orEmpty()
+            val normalized = preset.normalized().copy(source = ParametricPresetSource.USER)
+            val updated = current.filter { it.id != normalized.id } + normalized
+            prefs[KEY_PARAMETRIC_PRESETS] = encodeParametricPresets(updated)
+        }
+    }
+
+    suspend fun deleteUserParametricEqPreset(id: String) {
+        store.edit { prefs ->
+            val current = prefs[KEY_PARAMETRIC_PRESETS]?.let { decodeParametricPresets(it) }.orEmpty()
+            prefs[KEY_PARAMETRIC_PRESETS] = encodeParametricPresets(current.filter { it.id != id })
+            if (
+                prefs[KEY_SELECTED_PARAMETRIC_PRESET] == id &&
+                prefs[KEY_SELECTED_PARAMETRIC_PRESET_SOURCE] == ParametricPresetSource.USER.name
+            ) {
+                prefs.remove(KEY_SELECTED_PARAMETRIC_PRESET)
+                prefs.remove(KEY_SELECTED_PARAMETRIC_PRESET_SOURCE)
+                prefs.remove(KEY_PARAMETRIC_PRESET_DIRTY)
+            }
+        }
+    }
+
     // ----------------- Recent / quick-pick profiles (spinner) -----------------
     /** Most-recently-selected catalog entries (most recent first), capped at [MAX_RECENT]. */
     val recentProfiles: Flow<List<AutoEqCatalogEntry>> =
@@ -332,6 +398,19 @@ class SettingsStore(context: Context) {
     private fun decodeParametric(raw: String): List<ParametricBand> =
         runCatching {
             json.decodeFromString(parametricSerializer, raw).map { it.normalized() }.take(ParametricBand.MAX_BANDS)
+        }.getOrElse { emptyList() }
+
+    private fun encodeParametricPresets(list: List<ParametricEqPreset>): String =
+        json.encodeToString(
+            parametricPresetSerializer,
+            list.map { it.normalized().copy(source = ParametricPresetSource.USER) },
+        )
+
+    private fun decodeParametricPresets(raw: String): List<ParametricEqPreset> =
+        runCatching {
+            json.decodeFromString(parametricPresetSerializer, raw)
+                .map { it.normalized().copy(source = ParametricPresetSource.USER) }
+                .filter { it.bands.isNotEmpty() && !ParametricPresetCatalog.isBuiltInId(it.id) }
         }.getOrElse { emptyList() }
 
     private fun encodePlayback(s: PlaybackSnapshot): String =
@@ -408,6 +487,10 @@ class SettingsStore(context: Context) {
         private val KEY_EQ_MODE = stringPreferencesKey("eq_mode")
         private val KEY_GEQ_Q_SCALE = floatPreferencesKey("graphic_eq_q_scale")
         private val KEY_PARAMETRIC_BANDS = stringPreferencesKey("parametric_bands_json")
+        private val KEY_PARAMETRIC_PRESETS = stringPreferencesKey("parametric_presets_json")
+        private val KEY_SELECTED_PARAMETRIC_PRESET = stringPreferencesKey("parametric_selected_preset_id")
+        private val KEY_SELECTED_PARAMETRIC_PRESET_SOURCE = stringPreferencesKey("parametric_selected_preset_source")
+        private val KEY_PARAMETRIC_PRESET_DIRTY = booleanPreferencesKey("parametric_preset_dirty")
 
         /** Default EQ editing mode — must match EqMode.GRAPHIC.name. */
         const val DEFAULT_EQ_MODE = "GRAPHIC"
@@ -427,6 +510,7 @@ class SettingsStore(context: Context) {
         private val recentsSerializer = ListSerializer(AutoEqCatalogEntry.serializer())
         private val recentOpraSerializer = ListSerializer(RecentOpraProfile.serializer())
         private val parametricSerializer = ListSerializer(ParametricBand.serializer())
+        private val parametricPresetSerializer = ListSerializer(ParametricEqPreset.serializer())
     }
 }
 

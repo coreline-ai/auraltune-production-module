@@ -2,6 +2,10 @@ package com.coreline.auraltune.audio.eq
 
 import com.coreline.audio.EqFilterType
 import com.coreline.auraltune.data.ParametricBand
+import com.coreline.auraltune.data.ParametricEqPreset
+import com.coreline.auraltune.data.ParametricPresetBand
+import com.coreline.auraltune.data.ParametricPresetCatalog
+import com.coreline.auraltune.data.ParametricPresetSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -217,5 +221,52 @@ class ParametricEqTest {
         // Engine Manual chain caps at 20; UX cap must stay within that.
         assertTrue(ParametricBand.MAX_BANDS in 1..20)
         assertEquals(EqMode.GRAPHIC, EqMode.fromKey("")) // empty string is not a valid name
+    }
+
+    @Test
+    fun builtInParametricPresetCatalogIsSafeForCurrentEngine() {
+        assertEquals(13, ParametricPresetCatalog.templates.size)
+        val supported = setOf(
+            EqFilterType.PEAKING.nativeId,
+            EqFilterType.LOW_SHELF.nativeId,
+            EqFilterType.HIGH_SHELF.nativeId,
+            EqFilterType.HIGH_PASS.nativeId,
+        )
+        ParametricPresetCatalog.templates.forEach { template ->
+            assertTrue(template.id.startsWith("builtin:parametric:"))
+            assertTrue(template.bands.isNotEmpty())
+            assertTrue(template.bands.size <= ParametricBand.MAX_BANDS)
+            template.bands.forEach { band ->
+                val normalized = band.normalized()
+                assertEquals(normalized, band)
+                assertTrue(normalized.type in supported)
+                assertTrue(normalized.freqHz in ParametricBand.MIN_FREQ_HZ..ParametricBand.MAX_FREQ_HZ)
+                assertTrue(normalized.gainDb in -ParametricBand.MAX_GAIN_DB..ParametricBand.MAX_GAIN_DB)
+                assertTrue(normalized.q in ParametricBand.MIN_Q..ParametricBand.MAX_Q)
+            }
+        }
+    }
+
+    @Test
+    fun parametricPresetConvertsToEditableBandsWithFreshIds() {
+        var nextId = 0
+        val preset = ParametricEqPreset(
+            id = "p",
+            name = "start",
+            category = "cat",
+            source = ParametricPresetSource.BUILT_IN,
+            bands = listOf(
+                ParametricPresetBand(EqFilterType.PEAKING.nativeId, 250f, -2f, 1f),
+                ParametricPresetBand(EqFilterType.HIGH_SHELF.nativeId, 7_000f, 1.5f, 0.7f),
+            ),
+            createdAtMs = 0L,
+            updatedAtMs = 0L,
+        )
+
+        val bands = preset.toParametricBands { "band-${nextId++}" }
+
+        assertEquals(2, bands.size)
+        assertEquals(2, bands.map { it.id }.toSet().size)
+        assertTrue(preset.sameBandsAs(bands))
     }
 }

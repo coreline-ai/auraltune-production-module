@@ -404,6 +404,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 | **AboutCard / WebLink** | §4.4⑦. WebLink=`bodyMedium`/primary/밑줄, 세로 패딩6 |
 | **OpraProfileDetailDialog** | §4.5 |
 | **MiniPlayer / QueueRow** | §4.6 / §4.1 |
+| **ParametricEqCard** | §6.3. OPRA/AutoEQ 보정 위에 앱 자체 파라메트릭 시작점 프리셋을 선택·수정·저장 |
 | **EmptyStateMessage** | Row 전폭·패딩24·가운데, `bodyMedium` 한 줄. 빈/오프라인/무결과/가이드에 재사용(문구만 다름) |
 | **TextLinkButton** | 단순 `TextButton`(text) |
 
@@ -443,6 +444,17 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 - 입력: `autoEqFilters`/`preampDb`는 `listenMode != ORIGINAL`(=autoEqAudible)일 때만 전달, ORIGINAL이면 빈/0 → 그래프 평탄.
 - ⚠️ **범례·축 눈금은 현재 코드에 없음 → 디자이너 신규 추가**(캔버스 밖). 160dp 캔버스는 가로패딩 4dp뿐 **예약 공간 없음** → 범례(파랑=유효 / 회색=AutoEQ / 주황=프리앰프)와 dB 눈금(±5/±10/±15), 주파수 눈금(50…10k)을 그래프 위/아래 또는 좌측 거터에 별도 배치하고 그만큼 카드 높이를 늘릴지 결정 필요.
 
+### 6.3 ParametricEqCard 시작점 프리셋
+
+- `그래픽 / 파라메트릭` 세그먼트는 유지한다. 파라메트릭 선택 시 카드 상단에 **시작점** 영역을 표시한다.
+- 기본 시작점 12개는 앱 내 정적 카탈로그다. OPRA 원본 데이터나 OPRA-derived preset이 아니며, UI 문구는 `시작점`, `추천`, `수정됨`, `커스텀`만 사용한다.
+- 시작점 선택은 기존 파라메트릭 밴드를 **교체**한다. 누적 적용하지 않는다. 적용 후 사용자는 주파수/게인/Q/타입/추가/삭제를 자유롭게 수정한다.
+- 선택 표시: 기본/사용자 프리셋 그대로면 선택명, 수정 후 `선택명 수정됨`, 선택 없이 편집하면 `커스텀`.
+- 기본 시작점은 삭제/덮어쓰기 불가다. 수정본은 사용자 프리셋으로 저장하고, 사용자 프리셋만 삭제할 수 있다.
+- OPRA 또는 AutoEQ active provider는 프리셋 선택으로 바뀌지 않는다. 즉 `내 설정 = 현재 active provider 프로파일 + 현재 파라메트릭 시작점/커스텀` 구조다.
+- 필터 타입은 현재 엔진 지원 범위(`Peaking`, `Low Shelf`, `High Shelf`, `High Pass`)만 사용한다. Low Pass/Band Pass/Notch 등 새 DSP 타입은 이번 UI에 노출하지 않는다.
+- 접근성: 시작점 드롭다운, 저장, 사용자 프리셋 삭제, 밴드 추가/삭제 버튼은 contentDescription을 가진다.
+
 ---
 
 ## 7. 상태 매트릭스
@@ -458,6 +470,7 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 | OpraCatalogRow | 선택 / 지원·미선택 / 미지원(딤·`적용 불가`·탭불가) | isSelected·isSupported |
 | StatusCard | 보정 없음 / 보정 있음(배지+이름+measuredBy?) | profile·sourceLabel·measuredBy |
 | ListenModeBar | ORIGINAL / AUTOEQ / USER(평탄 힌트 변형) | listenMode·bands平坦여부 |
+| ParametricEqCard | 시작점 없음 / 기본 시작점 선택 / 사용자 프리셋 선택 / 수정됨 / 커스텀 / 저장 다이얼로그 | presets·selectedPresetId·source·dirty·bands |
 | GraphicEqCard | 평탄 vs 활성 / 프리앰프 有無(체크박스 활성/비활성) / 프리셋 없음(비활성 항목)·선택·dirty / 한계 nearest-snap | bands·preampDb·presets·selectedPresetId·gainLimit |
 | DiagnosticsCard / AboutCard | 접힘(기본) / 펼침 ; device null 폴백 ; 커밋 null 폴백 | expanded·deviceHash·commit |
 | OpraDetailDialog | 닫힘 / 지원(Apply) / 미지원(Apply 비활성+사유) / author 미상 / source 링크 無 | opraDetail·isSupported |
@@ -570,9 +583,9 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 > 참고(데이터 품질, 본 변경과 별개): OPRA 프로파일의 StatusCard 표시명이 변환 어댑터(`toAutoEqProfile`) 매핑상 제품명 대신 `Measured by …`로 나오는 경우가 있음 — OPRA→AutoEq 네이밍 보정은 별도 과제.
 
 ### 9.2 비교 모드 ↔ 엔진 (기본 USER)
-- ORIGINAL = 전부 off(순수 패스스루) **+ 백그라운드 네트워크 fetch 중단**(킬스위치). AUTOEQ = 프로파일만. USER = 프로파일 + 비평탄 그래픽 EQ.
+- ORIGINAL = 전부 off(순수 패스스루) **+ 백그라운드 네트워크 fetch 중단**(킬스위치). AUTOEQ = 프로파일만. USER = 프로파일 + 현재 Manual EQ(그래픽 또는 파라메트릭).
 - 모드 전환은 **0.5초 크로스페이드**(클릭 방지) — 급격한 점프 없음.
-- **그래픽 EQ 슬라이더를 만지면 자동으로 USER로 전환**(편집이 즉시 들리도록).
+- **그래픽 EQ 슬라이더 또는 파라메트릭 밴드를 편집하면 자동으로 USER로 전환**(편집이 즉시 들리도록).
 - ℹ️ ORIGINAL이 멈추는 건 **백그라운드 프로파일 업데이트/델타 fetch(네트워크)** 뿐 — 이미 로드된 카탈로그에 대한 **로컬 검색·선택은 정상 동작**. 즉 ORIGINAL 모드에서도 AutoEQ 탭 검색 결과는 평소대로 보임(카탈로그 상태머신은 그대로). 단 「프로파일 업데이트 확인」은 스킵되며 스낵바 `원음 모드 — 업데이트를 건너뜁니다`.
 
 ### 9.3 그래픽 EQ
@@ -581,12 +594,19 @@ AuralTune은 **헤드폰 음질 보정(EQ) 플레이어**입니다. 사용자가
 - 슬라이더 변경: 40ms 디바운스 후 엔진 반영, 400ms 후 영속. 어떤 밴드 편집/리셋/한계 변경이든 선택 프리셋을 **dirty**(해제).
 - 프리셋은 **밴드 게인 20개만** 저장(프로파일/계수 아님), 최근 프로파일은 최대 10개.
 
-### 9.4 OPRA 적용 2단계 + 한계
+### 9.4 파라메트릭 EQ
+- UX 밴드 상한은 **8개**다. native Manual chain은 더 넓은 여지가 있어도 현재 화면은 8개로 고정한다.
+- 기본 시작점은 12개이며, 모두 현재 지원 필터 타입과 8밴드 이하 조건을 만족해야 한다.
+- 시작점 적용은 `_parametricBands` 교체 + `EqMode.PARAMETRIC` 전환 + USER 모드 진입으로 처리한다.
+- 밴드 편집/추가/삭제/게인 한계 클램프는 선택 프리셋을 dirty로 표시한다. 모든 밴드가 제거되면 선택 상태를 해제한다.
+- 사용자 저장 프리셋은 파라메트릭 band 값만 저장한다. OPRA/AutoEQ 프로파일 값, attribution, license 고지는 포함하지 않는다.
+
+### 9.5 OPRA 적용 2단계 + 한계
 - 행 탭 = 메타데이터 시트 오픈(적용 아님) → Apply 버튼이 적용 + 즉시 닫힘.
 - **OPRA >10밴드는 통째 배제**(사유 `too many bands (N > 10)`), 미지원 필터/무밴드/잘못된 값도 배제. 반면 **AutoEQ 카탈로그 >10밴드는 앞 10개로 잘림**(비대칭 — 메시지 다름).
 - OPRA 라이선스 배지 텍스트 고정: `CC BY-SA 4.0`.
 
-### 9.5 재생 세션
+### 9.6 재생 세션
 - ExoPlayer **세션 1개**가 플레이어 탭·미니 공유. 진행 위치 500ms 폴링. 제목 폴백 `Unknown`, durationMs=0=길이 미상. **반복/셔플 컨트롤 없음**(API 미노출 — 추가 시 엔진 확장 필요).
 - EQ는 **스테레오 PCM에만** 적용(모노 등은 패스스루), 출력 항상 16-bit.
 

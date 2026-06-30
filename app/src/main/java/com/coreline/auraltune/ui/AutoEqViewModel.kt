@@ -18,6 +18,10 @@ import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.MusicPlayerController
 import com.coreline.auraltune.data.GraphicEqPreset
 import com.coreline.auraltune.data.ParametricBand
+import com.coreline.auraltune.data.ParametricEqPreset
+import com.coreline.auraltune.data.ParametricPresetBand
+import com.coreline.auraltune.data.ParametricPresetCatalog
+import com.coreline.auraltune.data.ParametricPresetSource
 import com.coreline.auraltune.data.RecentOpraProfile
 import com.coreline.auraltune.data.SettingsStore
 import com.coreline.auraltune.audio.eq.BiquadSpec
@@ -70,6 +74,7 @@ class AutoEqViewModel(
     private val engine: AudioEngine = locator.createAudioEngine()
     private val importedProfileFallback = application.getString(R.string.imported_profile_fallback)
     private val importedSourceLabel = application.getString(R.string.imported_source_label)
+    private val builtInParametricPresets = ParametricPresetCatalog.builtIns(application)
 
     /** Exposed so the screen can drive local music playback (T1). Owned/closed here. */
     val musicController: MusicPlayerController = MusicPlayerController(app, engine, settings)
@@ -240,12 +245,28 @@ class AutoEqViewModel(
     private val _parametricBands = MutableStateFlow<List<ParametricBand>>(emptyList())
     val parametricBands: StateFlow<List<ParametricBand>> = _parametricBands.asStateFlow()
 
+    /** Built-in starting points + user-saved parametric presets. */
+    val parametricPresets: StateFlow<List<ParametricEqPreset>> =
+        settings.userParametricEqPresets
+            .map { userPresets -> builtInParametricPresets + userPresets }
+            .stateIn(viewModelScope, SharingStarted.Eagerly, builtInParametricPresets)
+
     /** Last native Manual EQ update status. If native rejects a chain, keep manual bypassed. */
     private val _manualEqNativeApplied = MutableStateFlow(true)
 
     /** 파라메트릭 편집기에서 현재 선택된 밴드 id(드래그/Q 슬라이더/타입 변경 대상). 비영속. */
     private val _selectedParametricBandId = MutableStateFlow<String?>(null)
     val selectedParametricBandId: StateFlow<String?> = _selectedParametricBandId.asStateFlow()
+
+    /** Currently selected parametric preset. Dirty means the loaded bands were edited after apply. */
+    val selectedParametricEqPresetId: StateFlow<String?> =
+        settings.selectedParametricPresetId.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val selectedParametricEqPresetSource: StateFlow<ParametricPresetSource?> =
+        settings.selectedParametricPresetSource.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val parametricEqPresetDirty: StateFlow<Boolean> =
+        settings.parametricPresetDirty.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /**
      * 현재 모드의 Manual chain 내용 = 응답 그래프 + 엔진 적용의 단일 소스.
@@ -556,7 +577,10 @@ class AutoEqViewModel(
             _bandGains.value = clamped
             markGraphicEqPresetDirty()
         }
-        if (bandsChanged) _parametricBands.value = clampedBands
+        if (bandsChanged) {
+            _parametricBands.value = clampedBands
+            markParametricPresetDirty()
+        }
     }
 
     /** 게인 배열을 ±limit로 clamp(NaN/Inf → 0). [_bandGains]가 항상 라이브 한계 내에 있도록 보장. */
@@ -646,6 +670,7 @@ class AutoEqViewModel(
             )
         _parametricBands.value = cur + band
         _selectedParametricBandId.value = band.id
+        markParametricPresetDirty()
         if (eqMode.value != EqMode.PARAMETRIC) setEqMode(EqMode.PARAMETRIC)
         ensureUserListenMode()
     }
@@ -677,6 +702,7 @@ class AutoEqViewModel(
         }
         if (changed) {
             _selectedParametricBandId.value = id
+            markParametricPresetDirty()
             ensureUserListenMode()
         }
     }
@@ -685,6 +711,7 @@ class AutoEqViewModel(
     fun removeParametricBand(id: String) {
         _parametricBands.value = _parametricBands.value.filterNot { it.id == id }
         if (_selectedParametricBandId.value == id) _selectedParametricBandId.value = null
+        markParametricPresetDirtyOrClearIfEmpty()
     }
 
     /** 파라메트릭 편집기에서 선택 밴드 지정(드래그 핸들/Q 슬라이더 대상). null이면 해제. */
@@ -696,11 +723,84 @@ class AutoEqViewModel(
     fun resetParametricEq() {
         _parametricBands.value = emptyList()
         _selectedParametricBandId.value = null
+        clearParametricPresetSelection()
+    }
+
+    /**
+     * Load a parametric starting point or user preset. This replaces the current
+     * parametric band list; it never stacks on top of the existing list and it
+     * never changes the active AutoEQ/OPRA provider.
+     */
+    fun applyParametricPreset(id: String, source: ParametricPresetSource) {
+        val preset = findParametricPreset(id, source) ?: return
+        val limit = gainLimitDb.value
+        val bands = preset.toParametricBands { java.util.UUID.randomUUID().toString() }
+            .map { b -> b.copy(gainDb = b.gainDb.coerceIn(-limit, limit)).normalized() }
+            .take(ParametricBand.MAX_BANDS)
+        if (bands.isEmpty()) return
+        _parametricBands.value = bands
+        _selectedParametricBandId.value = bands.firstOrNull()?.id
+        viewModelScope.launch {
+            settings.setSelectedParametricPreset(preset.id, source, dirty = false)
+        }
+        if (eqMode.value != EqMode.PARAMETRIC) setEqMode(EqMode.PARAMETRIC)
+        ensureUserListenMode()
+    }
+
+    fun saveCurrentParametricPreset(name: String) {
+        val bands = _parametricBands.value.map { it.normalized() }.take(ParametricBand.MAX_BANDS)
+        if (bands.isEmpty()) return
+        val now = System.currentTimeMillis()
+        val preset = ParametricEqPreset(
+            id = java.util.UUID.randomUUID().toString(),
+            name = name.trim().ifBlank { application.getString(R.string.parametric_preset_default_name) },
+            category = application.getString(R.string.parametric_preset_category_user),
+            source = ParametricPresetSource.USER,
+            bands = bands.map { ParametricPresetBand.fromBand(it) },
+            createdAtMs = now,
+            updatedAtMs = now,
+        ).normalized()
+        viewModelScope.launch {
+            settings.upsertParametricEqPreset(preset)
+            settings.setSelectedParametricPreset(preset.id, ParametricPresetSource.USER, dirty = false)
+        }
+    }
+
+    fun deleteUserParametricPreset(id: String) {
+        if (ParametricPresetCatalog.isBuiltInId(id)) return
+        viewModelScope.launch {
+            settings.deleteUserParametricEqPreset(id)
+            if (
+                selectedParametricEqPresetId.value == id &&
+                selectedParametricEqPresetSource.value == ParametricPresetSource.USER
+            ) {
+                settings.setSelectedParametricPreset(null, null, dirty = false)
+            }
+        }
     }
 
     /** 사용자가 EQ를 만지면 '내 설정(USER)'으로 자동 전환 — 편집 결과가 즉시 들리게. */
     private fun ensureUserListenMode() {
         if (listenMode.value != ListenMode.USER) setListenMode(ListenMode.USER)
+    }
+
+    private fun findParametricPreset(id: String, source: ParametricPresetSource): ParametricEqPreset? =
+        parametricPresets.value.firstOrNull { it.id == id && it.source == source }?.normalized()
+
+    private fun markParametricPresetDirty() {
+        if (selectedParametricEqPresetId.value != null && !parametricEqPresetDirty.value) {
+            viewModelScope.launch { settings.setParametricPresetDirty(true) }
+        }
+    }
+
+    private fun markParametricPresetDirtyOrClearIfEmpty() {
+        if (_parametricBands.value.isEmpty()) clearParametricPresetSelection() else markParametricPresetDirty()
+    }
+
+    private fun clearParametricPresetSelection() {
+        if (selectedParametricEqPresetId.value != null || parametricEqPresetDirty.value) {
+            viewModelScope.launch { settings.setSelectedParametricPreset(null, null, dirty = false) }
+        }
     }
 
     /**

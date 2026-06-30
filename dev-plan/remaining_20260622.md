@@ -28,7 +28,7 @@
 - **T2-Custom / T3(HAL)** + **M0 effect `.so` 분리** — 외부/전역 + 루트 필요 → 불필요
 - 관련 코드는 휴면 보존(삭제 안 함): `app/.../audio/audiofx/*`, `src/debug/.../AudioFxSessionProbe.kt`, PoC 카드. 멀티프론트엔드 계획(`implement_20260617_122721.md`)·coverage 조사는 보관(archived).
 
-**현재 남음(T1 범위 내):** 필수 기능 관점의 미완료 항목은 없다. OPRA 상업 출시 고지는 현재 문구로 충분하다는 사용자 결정에 따라 완료로 본다. 기기별 오디오 라우트 수동 QA는 기능 완료 판단과 분리된 선택 운영 증적이다. AutoEQ DB 회귀 테스트(Migration/ETag/malformed index/stored-filter 동치), 300+ delta cap 초과의 전체 카탈로그 resync fallback + UI 안내는 `implement_20260626_144046.md`에서 패치 완료. query-driven 온라인 검색 fallback, 하이레이트 직접재생(24/32·384k AudioTrack), 그래픽 EQ 기본 프리셋/Q 튜닝은 선택 후속으로 유지.
+**현재 남음(T1 범위 내):** 필수 기능 관점의 미완료 항목은 없다. OPRA 상업 출시 고지는 현재 문구로 충분하다는 사용자 결정에 따라 완료로 본다. 기기별 오디오 라우트 수동 QA는 기능 완료 판단과 분리된 선택 운영 증적이다. AutoEQ DB 회귀 테스트(Migration/ETag/malformed index/stored-filter 동치), 300+ delta cap 초과의 전체 카탈로그 resync fallback + UI 안내는 `implement_20260626_144046.md`에서 패치 완료. 파라메트릭 EQ 시작점 프리셋은 `implement_20260629_165553.md` 기준으로 구현 완료. query-driven 온라인 검색 fallback, 하이레이트 직접재생(24/32·384k AudioTrack), 그래픽 EQ 추가 튜닝은 선택 후속으로 유지.
 
 ---
 
@@ -43,6 +43,7 @@
 | **Phase 2** 회전/생명주기(retained VM 소유) | ✅ | 실기기 회전 |
 | **Phase 3** 그래픽 EQ preset 저장/복원 | ✅ | 실기기 재시작/리셋/round-trip |
 | **Phase 5** 프로파일 DB 저장 + miss fallback | ✅ | 단위 + 실기기 v2 마이그레이션·오프라인 로드 |
+| **파라메트릭 EQ 시작점 프리셋** | ✅ | 단위 테스트 + debug/release 빌드 |
 
 ---
 

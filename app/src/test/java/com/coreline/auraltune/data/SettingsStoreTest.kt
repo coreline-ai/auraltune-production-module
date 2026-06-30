@@ -53,5 +53,38 @@ class SettingsStoreTest {
         assertEquals(snapshot, store.playbackSnapshot.first())
         store.setPlaybackSnapshot(null)
         assertNull(store.playbackSnapshot.first())
+
+        // Parametric presets are user Manual-EQ data; changing them must not alter OPRA provider.
+        store.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
+        val preset = ParametricEqPreset(
+            id = "user-preset",
+            name = "My FPS",
+            category = "사용자",
+            source = ParametricPresetSource.USER,
+            bands = listOf(
+                ParametricPresetBand(type = 0, freqHz = 250f, gainDb = -2f, q = 1f),
+                ParametricPresetBand(type = 0, freqHz = 2_500f, gainDb = 3f, q = 1.2f),
+            ),
+            createdAtMs = 1L,
+            updatedAtMs = 1L,
+        )
+        store.upsertParametricEqPreset(preset)
+        store.setSelectedParametricPreset(preset.id, ParametricPresetSource.USER, dirty = false)
+        assertEquals(SettingsStore.PROVIDER_OPRA, store.activeCorrectionProvider.first())
+        assertEquals(listOf(preset.normalized()), store.userParametricEqPresets.first())
+        assertEquals(preset.id, store.selectedParametricPresetId.first())
+        assertEquals(ParametricPresetSource.USER, store.selectedParametricPresetSource.first())
+        assertEquals(false, store.parametricPresetDirty.first())
+
+        store.setParametricPresetDirty(true)
+        assertEquals(true, store.parametricPresetDirty.first())
+        assertEquals(SettingsStore.PROVIDER_OPRA, store.activeCorrectionProvider.first())
+
+        store.deleteUserParametricEqPreset(preset.id)
+        assertEquals(emptyList<ParametricEqPreset>(), store.userParametricEqPresets.first())
+        assertNull(store.selectedParametricPresetId.first())
+        assertNull(store.selectedParametricPresetSource.first())
+        assertEquals(false, store.parametricPresetDirty.first())
+        assertEquals(SettingsStore.PROVIDER_OPRA, store.activeCorrectionProvider.first())
     }
 }

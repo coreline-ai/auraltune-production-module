@@ -917,6 +917,10 @@ private fun CorrectionScreen(
     val qScale by vm.graphicQScale.collectAsState()
     val parametricBands by vm.parametricBands.collectAsState()
     val selectedParametricBandId by vm.selectedParametricBandId.collectAsState()
+    val parametricPresets by vm.parametricPresets.collectAsState()
+    val selectedParametricPresetId by vm.selectedParametricEqPresetId.collectAsState()
+    val selectedParametricPresetSource by vm.selectedParametricEqPresetSource.collectAsState()
+    val parametricPresetDirty by vm.parametricEqPresetDirty.collectAsState()
     val manualSpecs by vm.manualResponseSpecs.collectAsState()
     val engineRateHz by vm.engineSampleRateHz.collectAsState()
     val diag by vm.diagnostics.collectAsState()
@@ -1204,9 +1208,16 @@ private fun CorrectionScreen(
                 EqMode.PARAMETRIC -> ParametricEqCard(
                     bands = parametricBands,
                     selectedId = selectedParametricBandId,
+                    presets = parametricPresets,
+                    selectedPresetId = selectedParametricPresetId,
+                    selectedPresetSource = selectedParametricPresetSource,
+                    presetDirty = parametricPresetDirty,
                     autoEqFilters = autoFilters,
                     gainLimitDb = gainLimit,
                     sampleRate = engineRateHz.toDouble(),
+                    onApplyPreset = vm::applyParametricPreset,
+                    onSavePreset = vm::saveCurrentParametricPreset,
+                    onDeleteUserPreset = vm::deleteUserParametricPreset,
                     onAddBand = vm::addParametricBand,
                     onSelectBand = vm::selectParametricBand,
                     onDragBand = { id, f, g -> vm.updateParametricBand(id, freqHz = f, gainDb = g) },
