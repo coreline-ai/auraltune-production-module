@@ -13,6 +13,7 @@ package com.coreline.auraltune.audio
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
@@ -42,6 +43,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.Closeable
 
 /** One queue entry. [title] is the SAF display name (or file tag title when available). */
@@ -62,6 +64,8 @@ data class PlaybackUiState(
     /** ExoPlayer repeatMode: REPEAT_MODE_OFF(0) / ONE(1) / ALL(2). */
     val repeatMode: Int = Player.REPEAT_MODE_OFF,
     val shuffleEnabled: Boolean = false,
+    /** Current track's embedded cover art (small, downscaled) for the blurred player background. */
+    val artwork: Bitmap? = null,
 )
 
 @UnstableApi
@@ -76,6 +80,11 @@ class MusicPlayerController(
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     @Volatile private var currentAudioBitDepth: Int? = null
     @Volatile private var currentAudioSampleRateHz: Int? = null
+
+    // Blurred-background album art. Keyed by the current track's URI so we decode ONCE per track
+    // (position ticks / repeated publish() must not re-decode). Main-thread only.
+    private var currentArtwork: Bitmap? = null
+    private var artworkKey: String? = null
     private val processor = AuralTuneAudioProcessor(engine, analyzer) { sampleRateHz, bitDepth ->
         currentAudioSampleRateHz = sampleRateHz.takeIf { it > 0 }
         currentAudioBitDepth = bitDepth.takeIf { it > 0 }
@@ -133,7 +142,10 @@ class MusicPlayerController(
                         publish()
                     }
                     override fun onMediaItemTransition(item: MediaItem?, reason: Int) {
-                        publish(); saveSnapshot()
+                        refreshArtwork(); publish(); saveSnapshot()
+                    }
+                    override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+                        refreshArtwork()
                     }
                     override fun onPositionDiscontinuity(
                         old: Player.PositionInfo,
@@ -354,7 +366,36 @@ class MusicPlayerController(
             playbackError = playbackError,
             repeatMode = player.repeatMode,
             shuffleEnabled = player.shuffleModeEnabled,
+            artwork = currentArtwork,
         )
+    }
+
+    // Decode the current track's embedded cover ONCE per track (URI-keyed), off the main thread,
+    // then publish. On track change we clear the old art first so the UI crossfades to the default
+    // while decoding. Prefer Media3's already-parsed [artworkData]; fall back to reading the file.
+    private fun refreshArtwork() {
+        val uri = queue.getOrNull(player.currentMediaItemIndex)?.uri
+        val key = uri?.toString()
+        if (key == null) {
+            if (artworkKey != null || currentArtwork != null) {
+                artworkKey = null; currentArtwork = null; publish()
+            }
+            return
+        }
+        if (key == artworkKey) return // already decoded / decoding for this track
+        artworkKey = key
+        currentArtwork = null
+        publish() // show default background immediately while we decode
+        val data = player.mediaMetadata.artworkData
+        scope.launch {
+            val bmp = withContext(Dispatchers.Default) {
+                data?.let { ArtworkDecoder.decode(it) } ?: ArtworkDecoder.fromUri(appContext, uri)
+            }
+            if (key == artworkKey) { // still the current track
+                currentArtwork = bmp
+                publish()
+            }
+        }
     }
 
     private fun handlePlayerError(error: PlaybackException) {

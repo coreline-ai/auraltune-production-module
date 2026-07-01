@@ -362,6 +362,8 @@ private fun PlayerScreen(
         // Now-playing + seek + transport.
         item {
             AuralTunePanel(elevated = true) {
+                // 재생곡 앨범아트를 블러 처리한 배경(없으면 기본 커버) 위에 Now-playing 콘텐츠를 얹는다.
+                BlurredArtBackground(artwork = state.artwork, modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     SpectrumVisualizer(
                         spectrum = musicController.spectrum,
@@ -465,6 +467,7 @@ private fun PlayerScreen(
                             )
                         }
                     }
+                }
                 }
             }
         }
@@ -1283,14 +1286,15 @@ private fun CorrectionScreen(
             }
         }
         item { AutoEqPreampCard(preampEnabled = preampEnabled, onTogglePreamp = vm::togglePreamp) }
-        item {
-            DiagnosticsCard(
-                diagnostics = diag,
-                currentSampleRate = vm.engineSampleRate(),
-                deviceHash = vm.currentDeviceHash(),
-            )
-        }
+        // 진단 정보 + 외부앱 신호 측정(PoC)은 개발/QA 전용 — 릴리스 UI에선 숨긴다.
         if (BuildConfig.DEBUG) {
+            item {
+                DiagnosticsCard(
+                    diagnostics = diag,
+                    currentSampleRate = vm.engineSampleRate(),
+                    deviceHash = vm.currentDeviceHash(),
+                )
+            }
             item { DebugSupport.AudioFxProbeCard() }
         }
         item {
