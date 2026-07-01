@@ -103,6 +103,8 @@ dependencies {
 
     // DataStore
     implementation(libs.androidx.datastore.preferences)
+    // Palette — extract an accent colour from the current track's cover for player controls
+    implementation(libs.androidx.palette)
 
     // Media3 ExoPlayer — T1 local-file playback (engine inserted via AudioProcessor)
     implementation(libs.media3.exoplayer)

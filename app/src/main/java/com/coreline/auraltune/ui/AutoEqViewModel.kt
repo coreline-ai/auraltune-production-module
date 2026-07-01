@@ -86,6 +86,9 @@ class AutoEqViewModel(
     val musicController: MusicPlayerController =
         MusicPlayerController(app, settings, locator.spectrumAnalyzer, locator.playbackTelemetry)
 
+    /** Small per-track cover thumbnails for the queue list. */
+    val albumArtCache = locator.albumArtCache
+
     private val deviceManager = com.coreline.auraltune.audio.DeviceAutoEqManager(
         context = app,
         engine = engine,

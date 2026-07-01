@@ -20,6 +20,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -43,7 +44,6 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Repeat
@@ -63,6 +63,7 @@ import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
@@ -107,6 +108,7 @@ import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
+import com.coreline.auraltune.audio.AlbumArtCache
 import com.coreline.auraltune.audio.PlaybackUiState
 import com.coreline.auraltune.audio.TrackInfo
 import com.coreline.auraltune.audio.eq.EqMode
@@ -365,6 +367,9 @@ private fun PlayerScreen(
     val musicController = vm.musicController
     val listenMode by vm.listenMode.collectAsState()
     val preampEnabled by vm.preampEnabled.collectAsState()
+    // 재생곡 커버에서 뽑은 강조색 — 슬라이더·트랜스포트에 반영(곡마다 변함, 없으면 테마색).
+    val accent = rememberArtworkAccent(state.artwork, MaterialTheme.colorScheme.secondaryContainer)
+    val onAccent = contentColorOn(accent)
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
         state = listState,
@@ -416,8 +421,8 @@ private fun PlayerScreen(
                         onValueChange = { f -> if (dur > 0) musicController.seekTo((f * dur).toLong()) },
                         enabled = state.hasMedia && dur > 0,
                         colors = SliderDefaults.colors(
-                            thumbColor = MaterialTheme.colorScheme.secondaryContainer,
-                            activeTrackColor = MaterialTheme.colorScheme.secondaryContainer,
+                            thumbColor = accent,
+                            activeTrackColor = accent,
                             inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                             disabledThumbColor = MaterialTheme.colorScheme.outlineVariant,
                             disabledActiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
@@ -442,7 +447,7 @@ private fun PlayerScreen(
                                 contentDescription = stringResource(
                                     if (state.shuffleEnabled) R.string.player_shuffle_on else R.string.player_shuffle_off,
                                 ),
-                                tint = if (state.shuffleEnabled) MaterialTheme.colorScheme.primary
+                                tint = if (state.shuffleEnabled) accent
                                        else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -455,6 +460,10 @@ private fun PlayerScreen(
                             onClick = musicController::togglePlayPause,
                             enabled = state.hasMedia,
                             modifier = Modifier.size(64.dp),
+                            colors = IconButtonDefaults.filledIconButtonColors(
+                                containerColor = accent,
+                                contentColor = onAccent,
+                            ),
                         ) {
                             Icon(
                                 if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -481,7 +490,7 @@ private fun PlayerScreen(
                                 ),
                                 tint = if (state.repeatMode == Player.REPEAT_MODE_OFF)
                                        MaterialTheme.colorScheme.onSurfaceVariant
-                                       else MaterialTheme.colorScheme.primary,
+                                       else accent,
                             )
                         }
                     }
@@ -523,6 +532,7 @@ private fun PlayerScreen(
                     track = track,
                     isCurrent = index == state.currentIndex,
                     isPlaying = state.isPlaying,
+                    artCache = vm.albumArtCache,
                     onClick = { musicController.playIndex(index) },
                     onRemove = { musicController.removeFromQueue(index) },
                 )
@@ -765,6 +775,7 @@ private fun QueueRow(
     track: TrackInfo,
     isCurrent: Boolean,
     isPlaying: Boolean,
+    artCache: AlbumArtCache,
     onClick: () -> Unit,
     onRemove: () -> Unit,
 ) {
@@ -777,21 +788,32 @@ private fun QueueRow(
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            imageVector = when {
-                isCurrent && isPlaying -> Icons.Default.Pause
-                isCurrent -> Icons.Default.PlayArrow
-                else -> Icons.Default.MusicNote
-            },
-            contentDescription = stringResource(
-                when {
-                    isCurrent && isPlaying -> R.string.player_queue_item_playing
-                    isCurrent -> R.string.player_queue_item_selected
-                    else -> R.string.player_queue_item_idle
-                },
-            ),
-            tint = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        // 트랙별 커버 썸네일(없으면 기본커버). 현재 곡은 위에 재생/일시정지 오버레이.
+        Box(modifier = Modifier.size(40.dp)) {
+            AlbumArtThumbnail(
+                artwork = rememberTrackArtwork(artCache, track.uri),
+                modifier = Modifier.matchParentSize(),
+                cornerRadius = 6.dp,
+            )
+            if (isCurrent) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.4f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = stringResource(
+                            if (isPlaying) R.string.player_queue_item_playing
+                            else R.string.player_queue_item_selected,
+                        ),
+                        tint = Color.White,
+                    )
+                }
+            }
+        }
         Spacer(Modifier.width(12.dp))
         Text(
             text = track.title,
