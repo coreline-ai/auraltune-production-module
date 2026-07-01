@@ -72,7 +72,8 @@ class AutoEqViewModel(
     private val locator = app.serviceLocator
     private val api: AutoEqApi = locator.autoEqApi
     private val settings: SettingsStore = locator.settingsStore
-    private val engine: AudioEngine = locator.createAudioEngine()
+    // App-singleton engine (shared with the media playback service's processor + deviceManager).
+    private val engine: AudioEngine = locator.audioEngine
     private val importedProfileFallback = application.getString(R.string.imported_profile_fallback)
     private val importedSourceLabel = application.getString(R.string.imported_source_label)
     private val builtInParametricPresets = ParametricPresetCatalog.builtIns(application)
@@ -81,8 +82,9 @@ class AutoEqViewModel(
     private val builtInTonePresets =
         com.coreline.auraltune.data.ToneEqPresetCatalog.builtIns(application)
 
-    /** Exposed so the screen can drive local music playback (T1). Owned/closed here. */
-    val musicController: MusicPlayerController = MusicPlayerController(app, engine, settings)
+    /** Exposed so the screen can drive local music playback (T1). Connects to AuralTuneMediaService. */
+    val musicController: MusicPlayerController =
+        MusicPlayerController(app, settings, locator.spectrumAnalyzer, locator.playbackTelemetry)
 
     private val deviceManager = com.coreline.auraltune.audio.DeviceAutoEqManager(
         context = app,
@@ -949,17 +951,17 @@ class AutoEqViewModel(
     fun currentDeviceHash(): String? = deviceManager.currentDeviceHash
 
     /**
-     * Phase 2: tear down the owned audio stack when the retained ViewModel is finally
-     * cleared (Activity finishing, not rotation). Order mirrors the old DisposableEffectClose:
+     * Tear down the ViewModel-scoped audio wiring when the retained ViewModel is finally cleared
+     * (Activity finishing, not rotation):
      *   1. deviceManager.close()  — stop route callbacks / native updateAutoEq.
-     *   2. musicController.close() — release ExoPlayer (its audio thread).
-     *   3. engine.close()         — free the native handle. Lifecycle-safe per P0-3.
-     * Each pre-close step is wrapped so a throw never prevents engine.close().
+     *   2. musicController.close() — release the MediaController (NOT the service player).
+     * The engine + spectrum analyzer are now process-lifetime app singletons (ServiceLocator),
+     * shared with AuralTuneMediaService, so they are intentionally NOT closed here — playback may
+     * continue in the background after the Activity/ViewModel is gone.
      */
     override fun onCleared() {
         runCatching { deviceManager.close() }
         runCatching { musicController.close() }
-        engine.close()
         super.onCleared()
     }
 

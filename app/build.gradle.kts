@@ -107,6 +107,8 @@ dependencies {
     // Media3 ExoPlayer — T1 local-file playback (engine inserted via AudioProcessor)
     implementation(libs.media3.exoplayer)
     implementation(libs.media3.common)
+    // Media3 session — MediaSessionService: lock-screen/notification controls, media buttons, bg playback
+    implementation(libs.media3.session)
 
     // Compose
     implementation(platform(libs.compose.bom))

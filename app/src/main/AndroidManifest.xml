@@ -18,6 +18,12 @@
         android:name="android.permission.BLUETOOTH_CONNECT"
         android:minSdkVersion="31" />
 
+    <!-- Foreground media playback service (lock-screen/notification controls, background playback).
+         FOREGROUND_SERVICE_MEDIA_PLAYBACK required on API 34+; POST_NOTIFICATIONS on API 33+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".AuralTuneApplication"
         android:allowBackup="false"
@@ -41,6 +47,17 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Media playback service: owns the ExoPlayer + MediaSession (lock-screen/notification
+             transport, media buttons, background playback). UI connects via MediaController. -->
+        <service
+            android:name=".audio.AuralTuneMediaService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
     </application>
 
 </manifest>

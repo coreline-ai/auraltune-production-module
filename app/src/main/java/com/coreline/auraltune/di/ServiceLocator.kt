@@ -6,6 +6,8 @@ package com.coreline.auraltune.di
 
 import android.content.Context
 import com.coreline.audio.AudioEngine
+import com.coreline.auraltune.audio.PlaybackTelemetry
+import com.coreline.auraltune.audio.SpectrumAnalyzer
 import com.coreline.autoeq.AutoEqApi
 import com.coreline.autoeq.repository.AutoEqRepository
 import com.coreline.auraltune.BuildConfig
@@ -51,8 +53,23 @@ class ServiceLocator(context: Context) {
     }
 
     /**
-     * Build a new [AudioEngine] for a playback session. Callers MUST close the returned
-     * instance after the audio thread has joined — see [com.coreline.auraltune.audio.MusicPlayerController].
+     * Process-lifetime audio EQ engine. Shared by the media playback service (its inline
+     * [com.coreline.auraltune.audio.AuralTuneAudioProcessor]), the ViewModel's manual-EQ updates,
+     * and [com.coreline.auraltune.audio.DeviceAutoEqManager]. Since the player now lives in a
+     * MediaSessionService, the engine MUST outlive any single ViewModel — hence an app singleton,
+     * not a per-session instance. The native handle is reclaimed at process death.
+     */
+    val audioEngine: AudioEngine by lazy { AudioEngine(DEFAULT_SAMPLE_RATE) }
+
+    /** Process-lifetime spectrum analyzer. The service's processor feeds it; the UI reads its flow. */
+    val spectrumAnalyzer: SpectrumAnalyzer by lazy { SpectrumAnalyzer() }
+
+    /** Process-lifetime audio-format telemetry bridge (service processor → player UI). */
+    val playbackTelemetry: PlaybackTelemetry by lazy { PlaybackTelemetry() }
+
+    /**
+     * Build a new [AudioEngine] for a playback session. Retained for callers/tests that need an
+     * isolated engine; the app's playback path uses the [audioEngine] singleton above.
      */
     fun createAudioEngine(sampleRate: Int = DEFAULT_SAMPLE_RATE): AudioEngine =
         AudioEngine(sampleRate)

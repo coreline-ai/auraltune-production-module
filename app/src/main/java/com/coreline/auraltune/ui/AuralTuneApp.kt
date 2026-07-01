@@ -188,6 +188,18 @@ fun AuralTuneApp() {
             bluetoothPermissionGranted = granted
             bluetoothPermissionDismissed = true
         }
+        // 알림 권한(API 33+): 미디어 재생 알림(잠금화면/셰이드 컨트롤)이 보이도록 최초 1회 요청.
+        // 거부해도 재생 자체는 정상 동작한다.
+        val notificationPermissionLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.RequestPermission(),
+        ) { /* no-op: 재생은 권한과 무관하게 동작 */ }
+        if (Build.VERSION.SDK_INT >= 33) {
+            LaunchedEffect(Unit) {
+                val granted = context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) ==
+                    PackageManager.PERMISSION_GRANTED
+                if (!granted) notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
         val showBluetoothPermissionNotice =
             Build.VERSION.SDK_INT >= 31 && !bluetoothPermissionGranted && !bluetoothPermissionDismissed
         val openPlayerPicker: () -> Unit = {
