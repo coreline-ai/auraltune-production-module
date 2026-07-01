@@ -1,7 +1,8 @@
 // ArtworkDecoder.kt
-// Decodes embedded album art into a SMALL downscaled bitmap for the blurred player background.
-// Small on purpose: the background is heavily blurred (an ambient colour wash), so a ~96px source
-// upscaled + blurred looks premium while keeping decode CPU + memory negligible.
+// Decodes embedded album art into a downscaled bitmap used for BOTH the crisp now-playing/mini-player
+// thumbnail AND the blurred player background. ~512px is small enough that decode CPU + memory stay
+// cheap (~1MB), crisp enough for the small thumbnails (drawn at ~40–64dp), and on API 31+ the blur
+// (Modifier.blur) handles the background softening.
 //
 // NOTE: call off the main thread (BitmapFactory / MediaMetadataRetriever are blocking).
 package com.coreline.auraltune.audio
@@ -14,8 +15,8 @@ import android.net.Uri
 
 object ArtworkDecoder {
 
-    /** Default max dimension for the blur-source bitmap. Small = heavily blurred + cheap. */
-    const val DEFAULT_MAX_PX = 96
+    /** Default max dimension — serves both the crisp thumbnail and the blurred background. */
+    const val DEFAULT_MAX_PX = 512
 
     /** Decode embedded cover bytes (from Media3 [MediaMetadata.artworkData]) → downscaled bitmap, or null. */
     fun decode(bytes: ByteArray, maxPx: Int = DEFAULT_MAX_PX): Bitmap? = runCatching {

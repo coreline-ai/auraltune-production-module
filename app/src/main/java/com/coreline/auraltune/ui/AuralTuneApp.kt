@@ -382,24 +382,30 @@ private fun PlayerScreen(
                         formatLabel = state.audioFormatLabel(),
                     )
                     Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = if (state.hasMedia) state.title else stringResource(R.string.player_no_media),
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 2,
-                    )
-                    // 재생 중인 음원에 걸린 보정(소스 배지 + 프로파일명). 보정 없으면 숨김.
-                    if (correctionSource != null) {
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            SourceBadge(correctionSource)
-                            correctionName?.let {
-                                Spacer(Modifier.width(8.dp))
-                                Text(
-                                    text = it,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        AlbumArtThumbnail(artwork = state.artwork, modifier = Modifier.size(64.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = if (state.hasMedia) state.title else stringResource(R.string.player_no_media),
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 2,
+                            )
+                            // 재생 중인 음원에 걸린 보정(소스 배지 + 프로파일명). 보정 없으면 숨김.
+                            if (correctionSource != null) {
+                                Spacer(Modifier.height(8.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    SourceBadge(correctionSource)
+                                    correctionName?.let {
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = it,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -838,10 +844,10 @@ private fun MiniPlayer(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Default.MusicNote,
-                contentDescription = stringResource(R.string.player_queue_item_idle),
-                tint = MaterialTheme.colorScheme.primary,
+            AlbumArtThumbnail(
+                artwork = state.artwork,
+                modifier = Modifier.size(40.dp),
+                cornerRadius = 6.dp,
             )
             Spacer(Modifier.width(10.dp))
             // 현재 보정 소스 배지(있을 때) — 듣는 중에도 무엇이 걸렸는지 한눈에.
