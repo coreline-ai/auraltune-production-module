@@ -22,6 +22,7 @@ import androidx.core.graphics.ColorUtils
 import androidx.palette.graphics.Palette
 import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.AlbumArtCache
+import com.coreline.auraltune.audio.TrackMeta
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -85,13 +86,14 @@ fun contentColorOn(accent: Color): Color =
     if (accent.luminance() > 0.5f) Color.Black else Color.White
 
 /**
- * Per-track cover thumbnail for a queue row, decoded/cached by [AlbumArtCache]. Returns the cached
- * bitmap immediately if present, otherwise null until the off-thread decode completes. Keyed on [uri].
+ * Per-track queue-row metadata (cover + artist + album), decoded/cached by [AlbumArtCache].
+ * Returns cached metadata immediately if present, else [TrackMeta.EMPTY] until the off-thread
+ * resolve completes. Keyed on [uri].
  */
 @Composable
-fun rememberTrackArtwork(cache: AlbumArtCache, uri: Uri): Bitmap? {
-    val art by produceState(cache.peek(uri), uri) {
+fun rememberTrackMeta(cache: AlbumArtCache, uri: Uri): TrackMeta {
+    val meta by produceState(cache.peek(uri) ?: TrackMeta.EMPTY, uri) {
         value = cache.get(uri)
     }
-    return art
+    return meta
 }

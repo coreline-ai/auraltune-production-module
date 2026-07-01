@@ -385,6 +385,7 @@ private fun PlayerScreen(
                     SpectrumVisualizer(
                         spectrum = musicController.spectrum,
                         formatLabel = state.audioFormatLabel(),
+                        accent = accent,
                     )
                     Spacer(Modifier.height(16.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -396,6 +397,16 @@ private fun PlayerScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 maxLines = 2,
                             )
+                            // 파일명 아래 가수 · 앨범(태그). 없으면 줄 숨김, 길면 말줄임.
+                            formatArtistAlbum(state.artist, state.album)?.let { sub ->
+                                Text(
+                                    text = sub,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             // 재생 중인 음원에 걸린 보정(소스 배지 + 프로파일명). 보정 없으면 숨김.
                             if (correctionSource != null) {
                                 Spacer(Modifier.height(8.dp))
@@ -546,10 +557,10 @@ private fun PlayerScreen(
 private fun SpectrumVisualizer(
     spectrum: StateFlow<FloatArray>,
     formatLabel: String?,
+    accent: Color,
     modifier: Modifier = Modifier,
 ) {
     val levels by spectrum.collectAsState()
-    val accent = MaterialTheme.colorScheme.secondaryContainer
     val slot = MaterialTheme.colorScheme.surfaceContainerLowest
     Box(
         modifier = modifier
@@ -593,7 +604,7 @@ private fun SpectrumVisualizer(
                 Text(
                     text = it,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    color = accent,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -606,6 +617,14 @@ private fun PlaybackUiState.audioFormatLabel(): String? {
     val sampleRate = audioSampleRateHz ?: return null
     if (!hasMedia || bitDepth <= 0 || sampleRate <= 0) return null
     return "$bitDepth/$sampleRate"
+}
+
+/** "가수 · 앨범" 보조 줄 텍스트(둘 다 없으면 null). now-playing 헤더 + 큐 행 공용. */
+private fun formatArtistAlbum(artist: String?, album: String?): String? = when {
+    !artist.isNullOrBlank() && !album.isNullOrBlank() -> "$artist · $album"
+    !artist.isNullOrBlank() -> artist
+    !album.isNullOrBlank() -> album
+    else -> null
 }
 
 @Composable
@@ -779,6 +798,7 @@ private fun QueueRow(
     onClick: () -> Unit,
     onRemove: () -> Unit,
 ) {
+    val meta = rememberTrackMeta(artCache, track.uri)
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -791,7 +811,7 @@ private fun QueueRow(
         // 트랙별 커버 썸네일(없으면 기본커버). 현재 곡은 위에 재생/일시정지 오버레이.
         Box(modifier = Modifier.size(40.dp)) {
             AlbumArtThumbnail(
-                artwork = rememberTrackArtwork(artCache, track.uri),
+                artwork = meta.artwork,
                 modifier = Modifier.matchParentSize(),
                 cornerRadius = 6.dp,
             )
@@ -815,14 +835,25 @@ private fun QueueRow(
             }
         }
         Spacer(Modifier.width(12.dp))
-        Text(
-            text = track.title,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = track.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isCurrent) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // 파일명 아래 가수 · 앨범(태그). 없으면 숨김, 길면 말줄임.
+            formatArtistAlbum(meta.artist, meta.album)?.let { sub ->
+                Text(
+                    text = sub,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
         IconButton(onClick = onRemove) {
             Icon(Icons.Default.Close, contentDescription = stringResource(R.string.player_remove))
         }

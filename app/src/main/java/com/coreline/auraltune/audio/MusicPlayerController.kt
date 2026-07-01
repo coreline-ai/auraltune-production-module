@@ -64,6 +64,9 @@ data class PlaybackUiState(
     val shuffleEnabled: Boolean = false,
     /** Current track's embedded cover art (small, downscaled) for the blurred player background. */
     val artwork: Bitmap? = null,
+    /** Tag metadata for the secondary line under the filename (null = tag absent). */
+    val artist: String? = null,
+    val album: String? = null,
 )
 
 @UnstableApi
@@ -375,9 +378,13 @@ class MusicPlayerController(
     private fun publish(playbackError: String? = _state.value.playbackError) {
         val c = controller ?: return
         val idx = c.currentMediaItemIndex
-        val title = c.mediaMetadata.title?.toString()
-            ?: queue.getOrNull(idx)?.title
+        // 결정 ①: 상단 줄은 파일명 우선(큐와 통일), 파일명 없을 때만 태그 제목 폴백.
+        val title = queue.getOrNull(idx)?.title
+            ?: c.mediaMetadata.title?.toString()
             ?: ""
+        val meta = c.mediaMetadata
+        val artist = meta.artist?.toString()?.ifBlank { null }
+        val album = meta.albumTitle?.toString()?.ifBlank { null }
         val fmt = telemetry.format.value
         _state.value = PlaybackUiState(
             hasMedia = c.mediaItemCount > 0,
@@ -393,6 +400,8 @@ class MusicPlayerController(
             repeatMode = c.repeatMode,
             shuffleEnabled = c.shuffleModeEnabled,
             artwork = currentArtwork,
+            artist = artist,
+            album = album,
         )
     }
 
