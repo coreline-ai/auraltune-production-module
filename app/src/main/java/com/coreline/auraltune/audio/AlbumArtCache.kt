@@ -48,7 +48,7 @@ class AlbumArtCache(context: Context, private val maxEntries: Int = 64) {
     private fun extract(uri: Uri): TrackMeta = runCatching {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(appContext, uri)
+            retriever.setDataSourceCompat(appContext, uri)
             val art = retriever.embeddedPicture?.let { ArtworkDecoder.decode(it, ROW_MAX_PX) }
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.ifBlank { null }
             val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.ifBlank { null }

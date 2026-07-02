@@ -515,30 +515,33 @@ class MusicPlayerController(
         }
     }
 
-    /** 컨트롤러 연결 시 1회: 저장된 큐/현재 곡/위치 복원. 자동 재생 없이 '일시정지'로 노출(사용자가 재생). */
+    /**
+     * 컨트롤러 연결 시 1회: 저장된 큐/현재 곡/위치 복원. 저장된 큐가 없으면(첫 실행/큐 비움)
+     * 번들 데모 곡([DEFAULT_ASSET_URI])을 기본 트랙으로 로딩한다. 항상 '일시정지'로 노출(자동 재생 금지).
+     */
     private fun restore() {
         scope.launch {
             try {
                 if (queue.isNotEmpty()) return@launch
-                val snap = settings.playbackSnapshot.first() ?: return@launch
-                if (snap.tracks.isEmpty() || queue.isNotEmpty()) return@launch // suspend 사이 사용자 추가 가드
                 val c = controller ?: return@launch
-                val tracks = snap.tracks.map { TrackInfo(Uri.parse(it.uri), it.title) }
+                val snap = settings.playbackSnapshot.first()
+                val saved = snap?.tracks
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.map { TrackInfo(Uri.parse(it.uri), it.title) }
+                if (queue.isNotEmpty()) return@launch // suspend 사이 사용자 추가 가드
+                // 저장된 큐가 있으면 그대로 복원, 없으면 번들 데모 곡 1개를 기본 로딩.
+                val tracks = saved ?: listOf(TrackInfo(DEFAULT_ASSET_URI, DEFAULT_ASSET_TITLE))
+                val index = (snap?.index ?: 0).coerceIn(0, tracks.lastIndex)
+                val pos = if (saved != null) (snap?.positionMs ?: 0L).coerceAtLeast(0L) else 0L
                 queue = tracks
-                c.setMediaItems(
-                    tracks.map(::toMediaItem),
-                    snap.index.coerceIn(0, tracks.lastIndex),
-                    snap.positionMs.coerceAtLeast(0L),
-                )
+                c.setMediaItems(tracks.map(::toMediaItem), index, pos)
                 c.prepare()
-                // 복원은 항상 '일시정지'로 노출(자동 재생 금지). 로딩 중 들어온 재생 탭은
-                // [pendingPlayRequest]에 기록되며 [maybeConsumeDeferredPlay]가 적용한다(끝 위치면 처음부터).
+                // 로딩 중 들어온 재생 탭은 [pendingPlayRequest]에 기록되며 [maybeConsumeDeferredPlay]가 적용.
                 c.playWhenReady = false
                 refreshArtwork()
                 publish()
             } finally {
                 restoreComplete = true
-                // 복원할 큐가 없으면 보류된 재생 의도를 비운다 — 이후 큐 추가가 의도치 않게 자동 재생되지 않도록.
                 if (queue.isEmpty()) pendingPlayRequest = false
             }
         }
@@ -558,5 +561,8 @@ class MusicPlayerController(
         private const val POSITION_POLL_MS = 500L
         private const val SAVE_EVERY_TICKS = 10 // ~5s마다 위치 저장
         private const val END_EPSILON_MS = 500L // 복원 위치가 곡 끝 이내면 처음부터 재생
+        // 번들 데모 곡(assets/cheonsangyeon.m4a). 저장된 큐가 없을 때 기본 로딩. 표시 제목은 파일명 관례.
+        private val DEFAULT_ASSET_URI: Uri = Uri.parse("asset:///cheonsangyeon.m4a")
+        private const val DEFAULT_ASSET_TITLE = "천상연_이창섭.m4a"
     }
 }

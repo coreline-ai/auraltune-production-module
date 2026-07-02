@@ -33,7 +33,7 @@ object ArtworkDecoder {
     fun fromUri(context: Context, uri: Uri, maxPx: Int = DEFAULT_MAX_PX): Bitmap? = runCatching {
         val retriever = MediaMetadataRetriever()
         try {
-            retriever.setDataSource(context, uri)
+            retriever.setDataSourceCompat(context, uri)
             retriever.embeddedPicture?.let { decode(it, maxPx) }
         } finally {
             // release() exists on all API levels (close() is API 29+, so we avoid .use{}).
@@ -47,5 +47,21 @@ object ArtworkDecoder {
         var s = 1
         while (w / (s * 2) >= maxPx && h / (s * 2) >= maxPx) s *= 2
         return s
+    }
+}
+
+/**
+ * Set a [MediaMetadataRetriever]'s source for content:// / file:// (via the ContentResolver) OR
+ * for bundled `asset:///name` URIs (via the AssetManager fd — the retriever can't resolve the asset
+ * scheme itself). Assets must be stored uncompressed (see `noCompress "m4a"`) for openFd to work.
+ */
+internal fun MediaMetadataRetriever.setDataSourceCompat(context: Context, uri: Uri) {
+    if (uri.scheme == "asset") {
+        val name = uri.path.orEmpty().trimStart('/')
+        context.assets.openFd(name).use { afd ->
+            setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
+        }
+    } else {
+        setDataSource(context, uri)
     }
 }

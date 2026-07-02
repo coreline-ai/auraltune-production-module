@@ -31,6 +31,12 @@ android {
         }
     }
 
+    // Bundled demo track (assets/cheonsangyeon.m4a) must stay uncompressed so the art/tag extractor
+    // (MediaMetadataRetriever.openFd) can memory-map it. m4a is already-compressed audio anyway.
+    androidResources {
+        noCompress += "m4a"
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
