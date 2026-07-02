@@ -627,8 +627,6 @@ private fun PlayerCorrectionStatusStrip(
         Row(
             modifier = Modifier
                 .fillMaxWidth(0.92f)
-                .clip(MaterialTheme.shapes.small)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f))
                 .padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
