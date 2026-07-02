@@ -10,6 +10,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.FileNotFoundException
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.zip.GZIPOutputStream
 
 /**
@@ -31,10 +32,12 @@ class BundledAssetSnapshotSourceTest {
         .also { GZIPOutputStream(it).use { z -> z.write(rawBytes) } }
         .toByteArray()
     private val goodSha = sha256Hex(rawBytes)
+    private val generatedAt = "2026-06-24T05:39:23Z"
 
     private fun manifest(sha256: String) =
         """{"schema_version":"v1","snapshot_version":"abc123def","opra_commit":"abc123def",""" +
             """"sha256":"$sha256","source_url":"https://example/db.jsonl",""" +
+            """"generated_at":"$generatedAt",""" +
             """"license_url":"${OpraEqProfile.LICENSE_URL}"}"""
 
     /** Source serving the raw jsonl under the primary path (what AGP's extracted asset looks like). */
@@ -65,6 +68,8 @@ class BundledAssetSnapshotSourceTest {
         // Provenance is available without touching the payload.
         assertEquals("abc123def", snap.syncState.opraCommit)
         assertEquals(goodSha, snap.syncState.sha256)
+        assertEquals(Instant.parse(generatedAt).toEpochMilli(), snap.syncState.generatedAt)
+        assertEquals(1, snap.syncState.schemaVersion)
         assertEquals(OpraEqProfile.LICENSE_URL, snap.syncState.licenseUrl)
         // Iterating reads + verifies, then yields lines (trailing blank line ignored by parser).
         val lines = snap.lines.toList().filter { it.isNotBlank() }
@@ -91,10 +96,13 @@ class BundledAssetSnapshotSourceTest {
     }
 
     @Test
-    fun fetch_emptyManifestSha_skipsVerification() = runBlocking {
-        // No sha recorded -> verification skipped, data still parses.
-        val snap = rawSource(manifest("")).fetch()
-        assertEquals(3, snap.lines.toList().filter { it.isNotBlank() }.size)
+    fun fetch_emptyManifestSha_throws() = runBlocking {
+        try {
+            rawSource(manifest("")).fetch()
+            fail("expected OpraIntegrityException")
+        } catch (e: OpraIntegrityException) {
+            assertTrue(e.message!!.contains("sha256"))
+        }
     }
 
     companion object {

@@ -15,13 +15,16 @@ import com.coreline.autoeq.search.AutoEqSearchEngine
 import com.coreline.auraltune.AuralTuneApplication
 import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
+import com.coreline.auraltune.audio.AudioEngineAutoEqSink
 import com.coreline.auraltune.audio.MusicPlayerController
+import com.coreline.auraltune.audio.audiofx.PlayerDynamicsEqStatus
 import com.coreline.auraltune.data.GraphicEqPreset
 import com.coreline.auraltune.data.ParametricBand
 import com.coreline.auraltune.data.ParametricEqPreset
 import com.coreline.auraltune.data.ParametricPresetBand
 import com.coreline.auraltune.data.ParametricPresetCatalog
 import com.coreline.auraltune.data.ParametricPresetSource
+import com.coreline.auraltune.data.PlaybackProcessingMode
 import com.coreline.auraltune.data.RecentOpraProfile
 import com.coreline.auraltune.data.SettingsStore
 import com.coreline.auraltune.audio.eq.BiquadSpec
@@ -91,7 +94,7 @@ class AutoEqViewModel(
 
     private val deviceManager = com.coreline.auraltune.audio.DeviceAutoEqManager(
         context = app,
-        engine = engine,
+        engine = AudioEngineAutoEqSink(engine),
         api = api,
         settings = settings,
         coroutineScope = viewModelScope,
@@ -134,6 +137,7 @@ class AutoEqViewModel(
     // 재생 가능하므로 '실제 사용중'은 activeProfile(=활성 provider의 선택) 하나뿐이다.
     private val _selectedAutoEqProfile = MutableStateFlow<AutoEqProfile?>(null)
     val selectedAutoEqProfile: StateFlow<AutoEqProfile?> = _selectedAutoEqProfile.asStateFlow()
+    private val _selectedAutoEqEntry = MutableStateFlow<AutoEqCatalogEntry?>(null)
     private val _selectedOpraProfile = MutableStateFlow<AutoEqProfile?>(null)
     val selectedOpraProfile: StateFlow<AutoEqProfile?> = _selectedOpraProfile.asStateFlow()
 
@@ -158,8 +162,22 @@ class AutoEqViewModel(
         settings.listenMode.map { ListenMode.fromKey(it) }
             .stateIn(viewModelScope, SharingStarted.Eagerly, ListenMode.USER)
 
+    val playbackProcessingMode: StateFlow<PlaybackProcessingMode> =
+        settings.playbackProcessingMode.stateIn(
+            viewModelScope,
+            SharingStarted.Eagerly,
+            PlaybackProcessingMode.AURAL_TUNE,
+        )
+
+    val playerDynamicsStatus: StateFlow<PlayerDynamicsEqStatus> =
+        locator.playbackProcessingState.dynamicsStatus
+
     fun setListenMode(mode: ListenMode) {
         viewModelScope.launch { settings.setListenMode(mode.key) }
+    }
+
+    fun setPlaybackProcessingMode(mode: PlaybackProcessingMode) {
+        viewModelScope.launch { settings.setPlaybackProcessingMode(mode) }
     }
 
     val preampEnabled: StateFlow<Boolean> =
@@ -357,6 +375,17 @@ class AutoEqViewModel(
         // route detection / sample-rate / saved-profile restore survive rotation.
         deviceManager.start()
 
+        viewModelScope.launch {
+            playbackProcessingMode.collect { locator.playbackProcessingState.setMode(it) }
+        }
+
+        viewModelScope.launch {
+            combine(activeProfile, listenMode) { profile, mode ->
+                if (mode == ListenMode.ORIGINAL) emptyList()
+                else profile?.filters.orEmpty().map { it.toBiquadSpec() }
+            }.collect { specs -> locator.playbackProcessingState.setTargetSpecs(specs) }
+        }
+
         // P0-3: ALL writes to engine.updateAutoEq / engine.clearAutoEq go through
         // DeviceAutoEqManager. The ViewModel never calls those directly. This
         // gives us a single owner for the engine's AutoEQ chain so route changes
@@ -383,9 +412,15 @@ class AutoEqViewModel(
                 settings.setSelectedProfileId(null)
                 return@launch
             }
+            _selectedAutoEqEntry.value = entry
             val autoEqActive = settings.activeCorrectionProvider.first() != SettingsStore.PROVIDER_OPRA
-            if (autoEqActive && deviceManager.selectProfileForCurrentDevice(entry)) {
-                _selectedAutoEqProfile.value = api.resolve(entry)?.validated()
+            if (autoEqActive) {
+                if (deviceManager.selectProfileForCurrentDevice(entry)) {
+                    _selectedAutoEqProfile.value = api.resolve(entry)?.validated()
+                } else {
+                    markCorrectionApplyFailed(R.string.profile_apply_failed)
+                    _selectedAutoEqProfile.value = api.resolve(entry)?.validated()
+                }
             } else {
                 // 표시용으로만 복원(엔진은 건드리지 않음).
                 _selectedAutoEqProfile.value = api.resolve(entry)?.validated()
@@ -417,17 +452,19 @@ class AutoEqViewModel(
                 preampEnabled,
                 manualResponseSpecs,
                 _manualEqNativeApplied,
-            ) { mode, preamp, specs, manualNativeOk ->
-                ManualEnableState(mode, preamp, specs, manualNativeOk)
+                playbackProcessingMode,
+            ) { mode, preamp, specs, manualNativeOk, processingMode ->
+                ManualEnableState(mode, preamp, specs, manualNativeOk, processingMode)
             }.collect { state ->
                 val mode = state.mode
                 val specs = state.specs
                 val auto = mode != ListenMode.ORIGINAL
                 val manual = mode == ListenMode.USER && specs.isNotEmpty() && state.manualNativeOk
+                val native = state.processingMode == PlaybackProcessingMode.AURAL_TUNE
                 // 비교용 전환이지만 클릭 방지를 위해 0.5s 크로스페이드 사용(immediate=false).
-                engine.setAutoEqEnabled(auto, immediate = false)
-                engine.setManualEqEnabled(manual)
-                engine.setAutoEqPreampEnabled(auto && state.preampEnabled)
+                engine.setAutoEqEnabled(native && auto, immediate = false)
+                engine.setManualEqEnabled(native && manual)
+                engine.setAutoEqPreampEnabled(native && auto && state.preampEnabled)
                 // 원음 청취 중엔 백그라운드 카탈로그/프로파일 fetch를 멈춘다(기존 킬스위치 의미 계승).
                 api.repository.setKillSwitchEngaged(mode == ListenMode.ORIGINAL)
             }
@@ -510,8 +547,7 @@ class AutoEqViewModel(
             _selectedOpraProfile.value = auto.validated()
             if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) {
                 if (!deviceManager.applyResolvedProfile(auto)) {
-                    settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                    _importMessage.value = application.getString(R.string.opra_restore_failed)
+                    markCorrectionApplyFailed(R.string.opra_restore_failed)
                 }
             }
         }
@@ -942,6 +978,7 @@ class AutoEqViewModel(
         val preampEnabled: Boolean,
         val specs: List<BiquadSpec>,
         val manualNativeOk: Boolean,
+        val processingMode: PlaybackProcessingMode,
     )
 
     /** Phase 6 / P3-C: current native sample rate for the diagnostics card. */
@@ -983,13 +1020,14 @@ class AutoEqViewModel(
             val resolved = api.resolve(entry)?.validated()
             val applied = deviceManager.selectProfileForCurrentDevice(entry)
             _selectedAutoEqProfile.value = resolved
+            _selectedAutoEqEntry.value = if (resolved != null) entry else null
             // Record into the quick-pick spinner so the user can re-select later.
             settings.addRecentProfile(entry)
             // Selecting an AutoEQ profile makes AUTOEQ the active correction provider (현재 사용중).
             if (applied) {
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
             } else {
-                _importMessage.value = application.getString(R.string.profile_apply_failed)
+                markCorrectionApplyFailed(R.string.profile_apply_failed)
             }
         }
     }
@@ -1074,10 +1112,7 @@ class AutoEqViewModel(
                 settings.addRecentOpraProfile(opra.id, opra.profileName)
             } else {
                 _selectedOpraProfile.value = auto.validated()
-                settings.setActiveOpraProfileId(opra.id)
-                settings.addRecentOpraProfile(opra.id, opra.profileName)
-                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                _importMessage.value = application.getString(R.string.profile_apply_failed)
+                markCorrectionApplyFailed(R.string.profile_apply_failed)
             }
         }
     }
@@ -1097,10 +1132,7 @@ class AutoEqViewModel(
                 settings.addRecentOpraProfile(recent.id, recent.name)
             } else {
                 _selectedOpraProfile.value = auto.validated()
-                settings.setActiveOpraProfileId(recent.id)
-                settings.addRecentOpraProfile(recent.id, recent.name)
-                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                _importMessage.value = application.getString(R.string.profile_apply_failed)
+                markCorrectionApplyFailed(R.string.profile_apply_failed)
             }
         }
     }
@@ -1109,6 +1141,7 @@ class AutoEqViewModel(
     fun clearAutoEqSelection() {
         viewModelScope.launch {
             _selectedAutoEqProfile.value = null
+            _selectedAutoEqEntry.value = null
             if (correctionProvider.value == SettingsStore.PROVIDER_AUTOEQ) {
                 deviceManager.clearProfileForCurrentDevice()
             } else {
@@ -1131,11 +1164,20 @@ class AutoEqViewModel(
     /** 비활성 AutoEQ 선택을 '지금 사용' — 다시 엔진에 적용하고 AUTOEQ를 활성 provider로. */
     fun useAutoEqSelection() {
         val p = _selectedAutoEqProfile.value ?: return
+        val entry = _selectedAutoEqEntry.value
         viewModelScope.launch {
-            if (deviceManager.applyResolvedProfile(p)) {
+            val applied = if (entry != null) {
+                deviceManager.selectProfileForCurrentDevice(entry)
+            } else {
+                deviceManager.applyResolvedProfile(p)
+            }
+            if (applied) {
+                if (entry != null) {
+                    _selectedAutoEqProfile.value = api.resolve(entry)?.validated() ?: p.validated()
+                }
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
             } else {
-                _importMessage.value = application.getString(R.string.profile_apply_failed)
+                markCorrectionApplyFailed(R.string.profile_apply_failed)
             }
         }
     }
@@ -1147,10 +1189,16 @@ class AutoEqViewModel(
             if (deviceManager.applyResolvedProfile(p)) {
                 settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_OPRA)
             } else {
-                settings.setActiveCorrectionProvider(SettingsStore.PROVIDER_AUTOEQ)
-                _importMessage.value = application.getString(R.string.profile_apply_failed)
+                markCorrectionApplyFailed(R.string.profile_apply_failed)
             }
         }
+    }
+
+    private suspend fun markCorrectionApplyFailed(messageResId: Int) {
+        // Native rejection clears the AutoEQ chain. Move listening back to ORIGINAL so
+        // badges, provider labels, and preamp state cannot imply an audible correction.
+        settings.setListenMode(ListenMode.ORIGINAL.key)
+        _importMessage.value = application.getString(messageResId)
     }
 
     fun togglePreamp() {

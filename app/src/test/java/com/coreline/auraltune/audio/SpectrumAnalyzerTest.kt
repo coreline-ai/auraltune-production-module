@@ -10,6 +10,13 @@ import kotlin.math.sqrt
 class SpectrumAnalyzerTest {
 
     @Test
+    fun hasSubscribers_isFalseBeforeUiCollection() {
+        val analyzer = SpectrumAnalyzer()
+
+        assertTrue("new analyzer should not have spectrum subscribers", !analyzer.hasSubscribers())
+    }
+
+    @Test
     fun computeBandEdges_areMonotonicAndStayBelowDisplayCeiling() {
         val bands = 12
         val lo = IntArray(bands)

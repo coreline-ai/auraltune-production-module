@@ -52,6 +52,16 @@ interface OsEffectBackend {
                 .onFailure { return null to AttachResult.Failed(it.message ?: "Equalizer attach failed") }
             return null to AttachResult.Unsupported
         }
+
+        /** Attach only DynamicsProcessing. Used by the internal player session mode. */
+        fun attachDynamics(audioSessionId: Int): Pair<OsEffectBackend?, AttachResult> {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return null to AttachResult.Unsupported
+            return runCatching { DynamicsProcessingBackend(audioSessionId) }
+                .fold(
+                    onSuccess = { it to AttachResult.Attached(it.name, it.bandCenters().size) },
+                    onFailure = { null to AttachResult.Failed(it.message ?: "DynamicsProcessing attach failed") },
+                )
+        }
     }
 }
 

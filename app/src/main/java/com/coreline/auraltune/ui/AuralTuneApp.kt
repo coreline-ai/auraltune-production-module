@@ -103,6 +103,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.media3.common.Player
+import com.coreline.autoeq.model.AutoEqProfile
 import com.coreline.autoeq.model.CatalogState
 import com.coreline.auraltune.opra.model.OpraCatalogEntry
 import com.coreline.auraltune.AuralTuneApplication
@@ -111,8 +112,10 @@ import com.coreline.auraltune.R
 import com.coreline.auraltune.audio.AlbumArtCache
 import com.coreline.auraltune.audio.PlaybackUiState
 import com.coreline.auraltune.audio.TrackInfo
+import com.coreline.auraltune.audio.audiofx.PlayerDynamicsEqStatus
 import com.coreline.auraltune.audio.eq.EqMode
 import com.coreline.auraltune.audio.eq.GraphicEqBands
+import com.coreline.auraltune.data.PlaybackProcessingMode
 import kotlinx.coroutines.flow.StateFlow
 
 /** Bottom-nav destinations. Player is home. */
@@ -156,9 +159,11 @@ fun AuralTuneApp() {
         // '현재 사용중'(실제 엔진 적용) 프로파일 = 활성 provider의 선택. 플레이어·미니 배지에 사용.
         val activeProfile by vm.activeProfile.collectAsState()
         val correctionProvider by vm.correctionProvider.collectAsState()
-        val correctionSource: String? = activeProfile?.let {
-            if (correctionProvider == "OPRA") "OPRA" else "AutoEQ"
-        }
+        val listenMode by vm.listenMode.collectAsState()
+        val playbackProcessingMode by vm.playbackProcessingMode.collectAsState()
+        val playerDynamicsStatus by vm.playerDynamicsStatus.collectAsState()
+        val audibleProfile = activeProfile.takeIf { isCorrectionAudible(listenMode) }
+        val correctionSource: String? = correctionSourceLabel(activeProfile, correctionProvider, listenMode)
 
         // 외부 링크(라이선스/측정 출처) 열기 — ActivityNotFound 가드 + Toast.
         val linkCtx = LocalContext.current
@@ -332,7 +337,9 @@ fun AuralTuneApp() {
                     contentPadding = padding,
                     listState = playerListState,
                     correctionSource = correctionSource,
-                    correctionName = activeProfile?.name,
+                    correctionName = audibleProfile?.name,
+                    playbackProcessingMode = playbackProcessingMode,
+                    playerDynamicsStatus = playerDynamicsStatus,
                     onAddFiles = openPlayerPicker,
                     showBluetoothPermissionNotice = showBluetoothPermissionNotice,
                     onRequestBluetoothPermission = {
@@ -359,6 +366,8 @@ private fun PlayerScreen(
     listState: LazyListState,
     correctionSource: String?,
     correctionName: String?,
+    playbackProcessingMode: PlaybackProcessingMode,
+    playerDynamicsStatus: PlayerDynamicsEqStatus,
     onAddFiles: () -> Unit,
     showBluetoothPermissionNotice: Boolean,
     onRequestBluetoothPermission: () -> Unit,
@@ -523,8 +532,11 @@ private fun PlayerScreen(
         item {
             PlayerCorrectionControls(
                 mode = listenMode,
+                processingMode = playbackProcessingMode,
+                dynamicsStatus = playerDynamicsStatus,
                 preampEnabled = preampEnabled,
                 onModeSelect = vm::setListenMode,
+                onProcessingModeSelect = vm::setPlaybackProcessingMode,
                 onTogglePreamp = vm::togglePreamp,
             )
         }
@@ -620,6 +632,17 @@ private fun PlaybackUiState.audioFormatLabel(): String? {
 }
 
 /** "가수 · 앨범" 보조 줄 텍스트(둘 다 없으면 null). now-playing 헤더 + 큐 행 공용. */
+internal fun isCorrectionAudible(mode: ListenMode): Boolean = mode != ListenMode.ORIGINAL
+
+internal fun correctionSourceLabel(
+    activeProfile: AutoEqProfile?,
+    correctionProvider: String,
+    listenMode: ListenMode,
+): String? {
+    if (!isCorrectionAudible(listenMode) || activeProfile == null) return null
+    return if (correctionProvider == "OPRA") "OPRA" else "AutoEQ"
+}
+
 private fun formatArtistAlbum(artist: String?, album: String?): String? = when {
     !artist.isNullOrBlank() && !album.isNullOrBlank() -> "$artist · $album"
     !artist.isNullOrBlank() -> artist
@@ -630,42 +653,98 @@ private fun formatArtistAlbum(artist: String?, album: String?): String? = when {
 @Composable
 private fun PlayerCorrectionControls(
     mode: ListenMode,
+    processingMode: PlaybackProcessingMode,
+    dynamicsStatus: PlayerDynamicsEqStatus,
     preampEnabled: Boolean,
     onModeSelect: (ListenMode) -> Unit,
+    onProcessingModeSelect: (PlaybackProcessingMode) -> Unit,
     onTogglePreamp: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val androidMode = processingMode == PlaybackProcessingMode.ANDROID_DYNAMICS
     AuralTunePanel(modifier = modifier) {
-        Row(
+        Column(
             modifier = Modifier.fillMaxWidth().padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            // 외곽 컨테이너 트랙 제거 — 그래픽/파라메트릭 토글과 동일한 칩(GainLimitButton)으로 통일.
-            GainLimitButton(
-                label = stringResource(R.string.player_mode_original),
-                selected = mode == ListenMode.ORIGINAL,
-                onClick = { onModeSelect(ListenMode.ORIGINAL) },
-                modifier = Modifier.weight(1f),
-            )
-            GainLimitButton(
-                label = stringResource(R.string.player_mode_eq_applied),
-                selected = mode == ListenMode.AUTOEQ,
-                onClick = { onModeSelect(ListenMode.AUTOEQ) },
-                modifier = Modifier.weight(1f),
-            )
-            GainLimitButton(
-                label = stringResource(R.string.player_mode_custom),
-                selected = mode == ListenMode.USER,
-                onClick = { onModeSelect(ListenMode.USER) },
-                modifier = Modifier.weight(1f),
-            )
-            // 프리앰프는 독립 토글이라 칩과 구분되는 자체 스타일 유지(높이만 칩과 맞춤).
-            PlayerPreampButton(
-                enabled = preampEnabled,
-                onClick = onTogglePreamp,
-                modifier = Modifier.width(96.dp),
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = stringResource(R.string.player_processing_label),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.width(72.dp),
+                )
+                GainLimitButton(
+                    label = stringResource(R.string.player_processing_auraltune),
+                    selected = processingMode == PlaybackProcessingMode.AURAL_TUNE,
+                    onClick = { onProcessingModeSelect(PlaybackProcessingMode.AURAL_TUNE) },
+                    modifier = Modifier.weight(1f),
+                )
+                GainLimitButton(
+                    label = stringResource(R.string.player_processing_android),
+                    selected = androidMode,
+                    onClick = { onProcessingModeSelect(PlaybackProcessingMode.ANDROID_DYNAMICS) },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 외곽 컨테이너 트랙 제거 — 그래픽/파라메트릭 토글과 동일한 칩(GainLimitButton)으로 통일.
+                GainLimitButton(
+                    label = stringResource(R.string.player_mode_original),
+                    selected = mode == ListenMode.ORIGINAL,
+                    onClick = { onModeSelect(ListenMode.ORIGINAL) },
+                    modifier = Modifier.weight(1f),
+                )
+                GainLimitButton(
+                    label = stringResource(R.string.player_mode_eq_applied),
+                    selected = mode == ListenMode.AUTOEQ || (androidMode && mode == ListenMode.USER),
+                    onClick = { onModeSelect(ListenMode.AUTOEQ) },
+                    modifier = Modifier.weight(1f),
+                )
+                if (!androidMode) {
+                    GainLimitButton(
+                        label = stringResource(R.string.player_mode_custom),
+                        selected = mode == ListenMode.USER,
+                        onClick = { onModeSelect(ListenMode.USER) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    // 프리앰프는 독립 토글이라 칩과 구분되는 자체 스타일 유지(높이만 칩과 맞춤).
+                    PlayerPreampButton(
+                        enabled = preampEnabled && isCorrectionAudible(mode),
+                        onClick = onTogglePreamp,
+                        modifier = Modifier.width(96.dp),
+                    )
+                }
+            }
+            if (androidMode) {
+                val statusText = when {
+                    dynamicsStatus.active -> stringResource(
+                        R.string.player_processing_android_status_format,
+                        dynamicsStatus.backend ?: stringResource(R.string.player_processing_android),
+                        dynamicsStatus.bandCount,
+                        dynamicsStatus.maxErrorDb ?: 0.0,
+                    )
+                    dynamicsStatus.message != null -> dynamicsStatus.message
+                    else -> stringResource(R.string.player_processing_android_ready)
+                }
+                Text(
+                    text = statusText,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (dynamicsStatus.active) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
         }
     }
 }

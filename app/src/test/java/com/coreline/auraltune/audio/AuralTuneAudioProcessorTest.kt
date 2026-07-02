@@ -1,6 +1,7 @@
 package com.coreline.auraltune.audio
 
 import androidx.media3.common.C
+import com.coreline.auraltune.BuildConfig
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertEquals
@@ -48,5 +49,30 @@ class AuralTuneAudioProcessorTest {
             .flip() as ByteBuffer
 
         assertEquals(0.25f, pcmSampleToFloat(input, 0, C.ENCODING_PCM_FLOAT), 0.000001f)
+    }
+
+    @Test
+    fun fastPathDiagnostics_recordsDebugCounters() {
+        AuralTuneAudioProcessorDiagnostics.reset()
+
+        AuralTuneAudioProcessorDiagnostics.recordFastPathHit(512)
+        AuralTuneAudioProcessorDiagnostics.recordFastPathHit(1024)
+        AuralTuneAudioProcessorDiagnostics.recordFastPathMiss()
+        AuralTuneAudioProcessorDiagnostics.recordFastPathNativeReject(-6)
+
+        val snapshot = AuralTuneAudioProcessorDiagnostics.snapshot()
+        if (BuildConfig.DEBUG) {
+            assertEquals(2L, snapshot.fastPathHits)
+            assertEquals(2L, snapshot.fastPathMisses)
+            assertEquals(1L, snapshot.nativeRejects)
+            assertEquals(1024L, snapshot.maxFrames)
+            assertEquals(-6, snapshot.lastNativeRc)
+        } else {
+            assertEquals(0L, snapshot.fastPathHits)
+            assertEquals(0L, snapshot.fastPathMisses)
+            assertEquals(0L, snapshot.nativeRejects)
+            assertEquals(0L, snapshot.maxFrames)
+            assertEquals(0, snapshot.lastNativeRc)
+        }
     }
 }

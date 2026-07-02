@@ -94,6 +94,14 @@ class SettingsStore(context: Context) {
         store.edit { it[KEY_SHUFFLE_ENABLED] = enabled }
     }
 
+    // ----------------- Player: processing backend -----------------
+    val playbackProcessingMode: Flow<PlaybackProcessingMode> =
+        store.data.map { prefs -> PlaybackProcessingMode.fromKey(prefs[KEY_PLAYBACK_PROCESSING_MODE]) }
+
+    suspend fun setPlaybackProcessingMode(mode: PlaybackProcessingMode) {
+        store.edit { it[KEY_PLAYBACK_PROCESSING_MODE] = mode.key }
+    }
+
     // ----------------- Selected profile -----------------
     val selectedProfileId: Flow<String?> = store.data.map { it[KEY_SELECTED_PROFILE_ID] }
     suspend fun setSelectedProfileId(id: String?) {
@@ -578,6 +586,7 @@ class SettingsStore(context: Context) {
         private val KEY_PLAYBACK_SNAPSHOT = stringPreferencesKey("playback_snapshot_json")
         private val KEY_REPEAT_MODE = intPreferencesKey("playback_repeat_mode")
         private val KEY_SHUFFLE_ENABLED = booleanPreferencesKey("playback_shuffle_enabled")
+        private val KEY_PLAYBACK_PROCESSING_MODE = stringPreferencesKey("playback_processing_mode")
         private val KEY_EQ_MODE = stringPreferencesKey("eq_mode")
         private val KEY_GEQ_Q_SCALE = floatPreferencesKey("graphic_eq_q_scale")
         private val KEY_PARAMETRIC_BANDS = stringPreferencesKey("parametric_bands_json")

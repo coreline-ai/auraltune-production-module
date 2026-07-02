@@ -23,6 +23,7 @@ import java.io.FileNotFoundException
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
+import java.time.Instant
 import java.util.zip.GZIPInputStream
 
 /** Thrown when the bundled snapshot's decompressed bytes do not match the manifest sha256. */
@@ -43,14 +44,20 @@ class BundledAssetSnapshotSource(
         val manifest = openAsset(manifestPath).use { it.readBytes() }
             .toString(Charsets.UTF_8)
             .let { json.decodeFromString<OpraManifestDto>(it) }
+        val expectedSha = manifest.sha256.trim()
+        if (expectedSha.isEmpty()) {
+            throw OpraIntegrityException("OPRA snapshot sha256 missing in manifest")
+        }
+        val generatedAt = parseGeneratedAt(manifest.generatedAt)
+        val schemaVersion = parseSchemaVersion(manifest.schemaVersion)
 
         // Lazy: read the raw jsonl bytes + verify sha256 only when the parser iterates (on import).
         val lines = Sequence {
             val raw = readSnapshotBytes()
             val actual = sha256Hex(raw)
-            if (manifest.sha256.isNotEmpty() && !actual.equals(manifest.sha256, ignoreCase = true)) {
+            if (!actual.equals(expectedSha, ignoreCase = true)) {
                 throw OpraIntegrityException(
-                    "OPRA snapshot sha256 mismatch: manifest=${manifest.sha256} actual=$actual",
+                    "OPRA snapshot sha256 mismatch: manifest=$expectedSha actual=$actual",
                 )
             }
             // raw bytes are byte-identical to the original jsonl, so the digest matches
@@ -63,7 +70,9 @@ class BundledAssetSnapshotSource(
             syncState = OpraSyncState(
                 snapshotVersion = manifest.snapshotVersion,
                 opraCommit = manifest.opraCommit ?: manifest.snapshotVersion,
-                sha256 = manifest.sha256.takeIf { it.isNotEmpty() },
+                generatedAt = generatedAt,
+                sha256 = expectedSha,
+                schemaVersion = schemaVersion,
                 sourceUrl = manifest.sourceUrl,
                 licenseUrl = manifest.licenseUrl ?: OpraEqProfile.LICENSE_URL,
             ),
@@ -93,6 +102,22 @@ class BundledAssetSnapshotSource(
                 sb.append(HEX[v ushr 4]).append(HEX[v and 0x0f])
             }
             return sb.toString()
+        }
+
+        private fun parseGeneratedAt(value: String?): Long {
+            val text = value?.trim().orEmpty()
+            if (text.isEmpty()) return 0L
+            return runCatching { Instant.parse(text).toEpochMilli() }
+                .getOrElse { throw OpraIntegrityException("OPRA manifest generated_at is invalid: $text") }
+        }
+
+        private fun parseSchemaVersion(value: String?): Int {
+            val text = value?.trim().orEmpty()
+            if (text.isEmpty()) return 1
+            return when {
+                text.equals("v1", ignoreCase = true) || text == "1" -> 1
+                else -> throw OpraIntegrityException("Unsupported OPRA manifest schema_version: $text")
+            }
         }
     }
 }

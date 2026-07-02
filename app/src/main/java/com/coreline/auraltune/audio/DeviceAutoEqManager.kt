@@ -24,7 +24,6 @@ import android.os.Looper
 import android.util.Log
 import com.coreline.auraltune.BuildConfig
 import com.coreline.auraltune.R
-import com.coreline.audio.AudioEngine
 import com.coreline.autoeq.AutoEqApi
 import com.coreline.autoeq.cache.ImportedProfileStore
 import com.coreline.autoeq.model.AutoEqCatalogEntry
@@ -60,9 +59,9 @@ import java.io.Closeable
  *     fall back to the global selection.
  *   - PII redaction: only DeviceKey.stableHash() may leave the device.
  */
-class DeviceAutoEqManager(
+internal class DeviceAutoEqManager(
     private val context: Context,
-    private val engine: AudioEngine,
+    private val engine: AutoEqEngineSink,
     private val api: AutoEqApi,
     private val settings: SettingsStore,
     private val coroutineScope: CoroutineScope,
@@ -157,19 +156,19 @@ class DeviceAutoEqManager(
         if (BuildConfig.DEBUG) {
             Log.i(TAG, "selectProfile: '${entry.name}' key=${key?.displayName}")
         }
-        // Always persist the global "selectedProfileId" so post-restart restore works
-        // even when no device is currently routed.
+        val applied = applyProfile(entry, expectedDeviceRaw = key?.raw)
+        if (!applied) return false
+
+        // Persist only after native apply succeeds. Otherwise route restore would
+        // remember a profile that never actually reached the engine.
         settings.setSelectedProfileId(entry.id)
-        // Route is not a gate: the active profile is applied on every output route
-        // (the user matches their headphones to the profile). When a device key is
-        // known, remember the per-device selection so it auto-restores on reconnect.
         if (key != null) {
             settings.setSelectionForDevice(
                 key.raw,
                 AutoEqSelection(profileId = entry.id, isEnabled = true),
             )
         }
-        return applyProfile(entry, expectedDeviceRaw = key?.raw)
+        return true
     }
 
     suspend fun clearProfileForCurrentDevice() {
@@ -194,8 +193,7 @@ class DeviceAutoEqManager(
         }
         val validated = profile.validated()
         if (validated.filters.isEmpty()) return false
-        pushToEngine(validated)
-        return true
+        return pushToEngine(validated)
     }
 
     /**
@@ -209,8 +207,7 @@ class DeviceAutoEqManager(
             engine.clearAutoEq()
             return false
         }
-        pushToEngine(validated)
-        return true
+        return pushToEngine(validated)
     }
 
     /**
@@ -221,7 +218,7 @@ class DeviceAutoEqManager(
         engine.clearAutoEq()
     }
 
-    private fun pushToEngine(p: AutoEqProfile) {
+    private fun pushToEngine(p: AutoEqProfile): Boolean {
         val n = p.filters.size
         val types = IntArray(n)
         val freqs = FloatArray(n)
@@ -234,7 +231,7 @@ class DeviceAutoEqManager(
             gains[i] = f.gainDB
             qs[i] = f.q.toFloat()
         }
-        engine.updateAutoEq(
+        val rc = engine.updateAutoEq(
             preampDB = p.preampDB,
             enableLimiter = true,
             profileOptimizedRate = p.optimizedSampleRate,
@@ -243,9 +240,17 @@ class DeviceAutoEqManager(
             gainsDB = gains,
             qFactors = qs,
         )
+        if (rc != 0) {
+            engine.clearAutoEq()
+            if (BuildConfig.DEBUG) {
+                Log.w(TAG, "pushToEngine: native update rejected rc=$rc count=$n")
+            }
+            return false
+        }
         if (BuildConfig.DEBUG) {
             Log.i(TAG, "pushToEngine: applied $n filters, preamp=${p.preampDB}")
         }
+        return true
     }
 
     /**
@@ -308,9 +313,11 @@ class DeviceAutoEqManager(
                 if (settings.activeCorrectionProvider.first() == SettingsStore.PROVIDER_OPRA) {
                     val opra = opraReapplyProvider?.invoke()
                     currentCoroutineContext().ensureActive()
-                    if (opra != null && opra.validated().filters.isNotEmpty() && lastKey?.raw == key.raw) {
+                    val applied = opra != null &&
+                        opra.validated().filters.isNotEmpty() &&
+                        lastKey?.raw == key.raw &&
                         pushToEngine(opra.validated())
-                    } else {
+                    if (!applied) {
                         engine.clearAutoEq()
                     }
                     return@launch

@@ -57,6 +57,10 @@ AuralTuneEQEngine::AuralTuneEQEngine(double sampleRate)
     // Pre-size the AutoEQ crossfade dry-copy buffer so the audio thread never
     // allocates during a transition (kMaxProcessFrames stereo frames).
     autoEqDryScratch_.resize(static_cast<size_t>(kMaxProcessFrames) * 2u);
+
+    // processFormatted() decodes into this scratch on the audio thread. Keep it
+    // fully sized up front so the first large callback cannot allocate.
+    formatScratch_.resize(static_cast<size_t>(kMaxProcessFrames) * 2u);
 }
 
 float AuralTuneEQEngine::computeAutoEqMixStep(double rate) {

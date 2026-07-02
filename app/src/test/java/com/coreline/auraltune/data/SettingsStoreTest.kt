@@ -102,6 +102,13 @@ class SettingsStoreTest {
         store.setShuffleEnabled(false)
         assertEquals(false, store.shuffleEnabled.first())
 
+        // Playback processing backend: default AuralTune, round-trip Android Dynamics.
+        assertEquals(PlaybackProcessingMode.AURAL_TUNE, store.playbackProcessingMode.first())
+        store.setPlaybackProcessingMode(PlaybackProcessingMode.ANDROID_DYNAMICS)
+        assertEquals(PlaybackProcessingMode.ANDROID_DYNAMICS, store.playbackProcessingMode.first())
+        store.setPlaybackProcessingMode(PlaybackProcessingMode.AURAL_TUNE)
+        assertEquals(PlaybackProcessingMode.AURAL_TUNE, store.playbackProcessingMode.first())
+
         // Tone EQ gains [bass, mid, treble]: default zeros, round-trip, length/NaN/range normalize.
         assertEquals(SettingsStore.TONE_BANDS, store.toneGains.first().size)
         store.setToneGains(floatArrayOf(4f, -3f, 6f))

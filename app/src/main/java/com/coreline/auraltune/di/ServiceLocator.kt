@@ -7,6 +7,7 @@ package com.coreline.auraltune.di
 import android.content.Context
 import com.coreline.audio.AudioEngine
 import com.coreline.auraltune.audio.AlbumArtCache
+import com.coreline.auraltune.audio.PlaybackProcessingState
 import com.coreline.auraltune.audio.PlaybackTelemetry
 import com.coreline.auraltune.audio.SpectrumAnalyzer
 import com.coreline.autoeq.AutoEqApi
@@ -67,6 +68,9 @@ class ServiceLocator(context: Context) {
 
     /** Process-lifetime audio-format telemetry bridge (service processor → player UI). */
     val playbackTelemetry: PlaybackTelemetry by lazy { PlaybackTelemetry() }
+
+    /** Process-lifetime playback backend switch shared by UI, service, and AudioProcessor. */
+    val playbackProcessingState: PlaybackProcessingState by lazy { PlaybackProcessingState() }
 
     /** Process-lifetime LRU cache of small per-track cover thumbnails for the queue list. */
     val albumArtCache: AlbumArtCache by lazy { AlbumArtCache(appContext) }

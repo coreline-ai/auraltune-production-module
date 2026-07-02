@@ -127,7 +127,8 @@ class MusicPlayerController(
             refreshArtwork(); publish(); saveSnapshot()
         }
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
-            refreshArtwork()
+            // 메타데이터가 뒤늦게 확정될 때(가수/앨범/포맷) UI도 갱신 — 전환 직후 stale 값 방지.
+            refreshArtwork(); publish()
         }
         override fun onPositionDiscontinuity(
             old: Player.PositionInfo,
@@ -407,7 +408,12 @@ class MusicPlayerController(
 
     // Decode the current track's embedded cover ONCE per track (URI-keyed), off the main thread,
     // then publish. On track change we clear the old art first so the UI crossfades to the default
-    // while decoding. Prefer Media3's already-parsed [artworkData]; fall back to reading the file.
+    // while decoding.
+    //
+    // Decode from the track's URI (authoritative for THIS track). We deliberately do NOT read
+    // player.mediaMetadata.artworkData: on rapid skips it can still hold the PREVIOUS track's art
+    // at transition time, which would then bind to the new key and stick (the later
+    // onMediaMetadataChanged is short-circuited by the key guard) — showing the wrong cover.
     private fun refreshArtwork() {
         val c = controller ?: return
         val uri = queue.getOrNull(c.currentMediaItemIndex)?.uri
@@ -422,12 +428,9 @@ class MusicPlayerController(
         artworkKey = key
         currentArtwork = null
         publish() // show default background immediately while we decode
-        val data = c.mediaMetadata.artworkData
         scope.launch {
-            val bmp = withContext(Dispatchers.Default) {
-                data?.let { ArtworkDecoder.decode(it) } ?: ArtworkDecoder.fromUri(appContext, uri)
-            }
-            if (key == artworkKey) { // still the current track
+            val bmp = withContext(Dispatchers.Default) { ArtworkDecoder.fromUri(appContext, uri) }
+            if (key == artworkKey) { // still the current track (stale decodes from fast skips discarded)
                 currentArtwork = bmp
                 publish()
             }

@@ -11,6 +11,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Player
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -21,6 +22,13 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.coreline.audio.AudioEngine
 import com.coreline.auraltune.AuralTuneApplication
+import com.coreline.auraltune.audio.audiofx.PlayerDynamicsEqController
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
 
 /**
  * Build the playback ExoPlayer with the AuralTune EQ inserted as an [AudioProcessor].
@@ -35,8 +43,9 @@ internal fun buildAuralTunePlayer(
     engine: AudioEngine,
     analyzer: SpectrumAnalyzer,
     telemetry: PlaybackTelemetry,
+    processingState: PlaybackProcessingState,
 ): ExoPlayer {
-    val processor = AuralTuneAudioProcessor(engine, analyzer) { sampleRateHz, bitDepth ->
+    val processor = AuralTuneAudioProcessor(engine, analyzer, processingState) { sampleRateHz, bitDepth ->
         telemetry.update(sampleRateHz.takeIf { it > 0 }, bitDepth.takeIf { it > 0 })
     }
     val renderersFactory = object : DefaultRenderersFactory(context) {
@@ -67,17 +76,48 @@ internal fun buildAuralTunePlayer(
 class AuralTuneMediaService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var dynamicsController: PlayerDynamicsEqController? = null
 
     override fun onCreate() {
         super.onCreate()
         val locator = (application as AuralTuneApplication).serviceLocator
         locator.spectrumAnalyzer.start()
+        val processingState = locator.playbackProcessingState
+        val controller = PlayerDynamicsEqController(
+            statusSink = processingState::setDynamicsStatus,
+            sampleRateProvider = { locator.audioEngine.sampleRate.toDouble() },
+        )
+        dynamicsController = controller
         val player = buildAuralTunePlayer(
             context = this,
             engine = locator.audioEngine,
             analyzer = locator.spectrumAnalyzer,
             telemetry = locator.playbackTelemetry,
+            processingState = processingState,
         )
+        player.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                controller.onAudioSessionIdChanged(audioSessionId)
+            }
+
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                controller.onAudioSessionIdChanged(player.audioSessionId)
+            }
+
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                controller.onAudioSessionIdChanged(player.audioSessionId)
+            }
+        })
+        serviceScope.launch {
+            locator.settingsStore.playbackProcessingMode.collectLatest { processingState.setMode(it) }
+        }
+        serviceScope.launch {
+            processingState.mode.collectLatest { controller.setMode(it) }
+        }
+        serviceScope.launch {
+            processingState.targetSpecs.collectLatest { controller.setTargetSpecs(it) }
+        }
         mediaSession = MediaSession.Builder(this, player).build()
     }
 
@@ -93,6 +133,9 @@ class AuralTuneMediaService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        serviceScope.cancel()
+        dynamicsController?.close()
+        dynamicsController = null
         mediaSession?.run {
             player.release()
             release()

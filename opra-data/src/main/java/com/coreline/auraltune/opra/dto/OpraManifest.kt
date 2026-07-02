@@ -14,6 +14,7 @@ data class OpraManifestDto(
     @SerialName("snapshot_version") val snapshotVersion: String? = null,
     @SerialName("opra_commit") val opraCommit: String? = null,
     @SerialName("sha256") val sha256: String = "",
+    @SerialName("generated_at") val generatedAt: String? = null,
     @SerialName("source_url") val sourceUrl: String? = null,
     @SerialName("license_url") val licenseUrl: String? = null,
 )

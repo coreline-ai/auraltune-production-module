@@ -1,8 +1,3 @@
-// SpectrumAnalyzer.kt
-// 재생 중인 (post-EQ) PCM에서 실시간 주파수 스펙트럼을 계산해 막대 시각화용으로 노출한다.
-//   - feed(): 오디오 RT 스레드에서 모노 믹스를 링버퍼에 '복사만'(무할당). FFT는 절대 여기서 안 함.
-//   - 백그라운드 코루틴: 최신 FFT_SIZE 샘플 → Hann 창 → radix-2 FFT → 로그 간격 밴드 → 평활 → StateFlow.
-// 마이크 권한 불필요(앱 자체 재생 PCM 사용). 구독자가 없으면 계산을 건너뛴다(전력 절약).
 package com.coreline.auraltune.audio
 
 import kotlinx.coroutines.CoroutineScope
@@ -26,13 +21,12 @@ class SpectrumAnalyzer(
     private val bandCount: Int = DEFAULT_BANDS,
 ) : Closeable {
 
-    // 단일 생산자(오디오 스레드) / 단일 소비자(분석 코루틴) 링버퍼. writePos(volatile)로 happens-before 확립.
+    // Single audio-thread writer, single analyzer coroutine reader.
     private val ring = FloatArray(RING_SIZE)
     @Volatile private var writePos = 0L
     @Volatile private var sampleRate = 48_000
 
     private val _spectrum = MutableStateFlow(FloatArray(bandCount))
-    /** 밴드별 레벨(0..1), 저주파→고주파. 약 45fps로 갱신. */
     val spectrum: StateFlow<FloatArray> = _spectrum.asStateFlow()
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -40,19 +34,50 @@ class SpectrumAnalyzer(
 
     fun setSampleRate(sr: Int) { if (sr > 0) sampleRate = sr }
 
-    /** 오디오 RT 스레드: post-EQ 인터리브드 float에서 모노 믹스를 링버퍼에 복사(무할당·논블로킹). */
+    /** Cheap audio-thread gate: avoid copying PCM when no UI is collecting spectrum. */
+    fun hasSubscribers(): Boolean = _spectrum.subscriptionCount.value > 0
+
+    /** Copy interleaved float PCM into the mono ring buffer. */
     fun feed(buf: ByteBuffer, frames: Int, channels: Int) {
         if (frames <= 0 || channels <= 0) return
         var w = writePos
         val inv = 1f / channels
         var f = 0
         while (f < frames) {
-            val base = (f * channels) * 4 // 절대 바이트 인덱스(buf.position 불변)
+            val base = (f * channels) * 4
             var acc = 0f
             var c = 0
-            while (c < channels) { acc += buf.getFloat(base + c * 4); c++ }
+            while (c < channels) {
+                acc += buf.getFloat(base + c * 4)
+                c++
+            }
             ring[(w and RING_MASK).toInt()] = acc * inv
-            w++; f++
+            w++
+            f++
+        }
+        writePos = w
+    }
+
+    /** Copy interleaved little-endian 16-bit PCM into the mono ring buffer. */
+    fun feedPcm16(buf: ByteBuffer, frames: Int, channels: Int) {
+        if (frames <= 0 || channels <= 0) return
+        var w = writePos
+        val inv = 1f / channels
+        var f = 0
+        while (f < frames) {
+            val base = (f * channels) * 2
+            var acc = 0f
+            var c = 0
+            while (c < channels) {
+                val offset = base + c * 2
+                val lo = buf.get(offset).toInt() and 0xFF
+                val hi = buf.get(offset + 1).toInt()
+                acc += (lo or (hi shl 8)).toShort().toInt() / 32768.0f
+                c++
+            }
+            ring[(w and RING_MASK).toInt()] = acc * inv
+            w++
+            f++
         }
         writePos = w
     }
@@ -61,7 +86,7 @@ class SpectrumAnalyzer(
         if (job?.isActive == true) return
         job = scope.launch {
             val window = FloatArray(FFT_SIZE) {
-                (0.5 - 0.5 * cos(2.0 * Math.PI * it / (FFT_SIZE - 1))).toFloat() // Hann
+                (0.5 - 0.5 * cos(2.0 * Math.PI * it / (FFT_SIZE - 1))).toFloat()
             }
             val re = FloatArray(FFT_SIZE)
             val im = FloatArray(FFT_SIZE)
@@ -71,46 +96,66 @@ class SpectrumAnalyzer(
             val hiBin = IntArray(bandCount)
             var edgesForSr = -1
             var lastWrite = -1L
+            var emittedSilentFrame = true
+
             while (isActive) {
-                if (_spectrum.subscriptionCount.value > 0) {
-                    val w = writePos
-                    if (w >= FFT_SIZE && w != lastWrite) {
-                        lastWrite = w
-                        if (sampleRate != edgesForSr) {
-                            SpectrumAnalyzerMath.computeBandEdges(loBin, hiBin, sampleRate)
-                            edgesForSr = sampleRate
-                        }
-                        val startIdx = w - FFT_SIZE
-                        for (i in 0 until FFT_SIZE) {
-                            re[i] = ring[((startIdx + i) and RING_MASK).toInt()] * window[i]
-                            im[i] = 0f
-                        }
-                        SpectrumAnalyzerMath.fft(re, im)
-                        for (b in 0 until bandCount) {
-                            var k = loBin[b]
-                            val hi = hiBin[b]
-                            var sum = 0f
-                            var cnt = 0
-                            while (k <= hi) {
-                                sum += sqrt(re[k] * re[k] + im[k] * im[k]); cnt++; k++
-                            }
-                            val mean = if (cnt > 0) sum / cnt else 0f
-                            val norm = mean / FFT_SIZE * 4f
-                            val db = 20f * log10(norm + 1e-7f)
-                            target[b] = ((db - DB_FLOOR) / (DB_CEIL - DB_FLOOR)).coerceIn(0f, 1f)
-                        }
-                    } else {
-                        // 새 오디오 없음(일시정지/무음) → 0으로 수렴(자연 감쇠).
-                        for (b in 0 until bandCount) target[b] = 0f
-                    }
-                    // attack 빠름 / decay 느림 — 보기 좋게.
-                    for (b in 0 until bandCount) {
-                        val t = target[b]
-                        levels[b] += (t - levels[b]) * (if (t > levels[b]) ATTACK else DECAY)
-                    }
-                    _spectrum.value = levels.copyOf() // 새 인스턴스 → Compose 갱신
+                if (_spectrum.subscriptionCount.value <= 0) {
+                    delay(IDLE_FRAME_MS)
+                    continue
                 }
-                delay(FRAME_MS)
+
+                val w = writePos
+                val hasNewAudio = w >= FFT_SIZE && w != lastWrite
+                if (hasNewAudio) {
+                    lastWrite = w
+                    if (sampleRate != edgesForSr) {
+                        SpectrumAnalyzerMath.computeBandEdges(loBin, hiBin, sampleRate)
+                        edgesForSr = sampleRate
+                    }
+                    val startIdx = w - FFT_SIZE
+                    for (i in 0 until FFT_SIZE) {
+                        re[i] = ring[((startIdx + i) and RING_MASK).toInt()] * window[i]
+                        im[i] = 0f
+                    }
+                    SpectrumAnalyzerMath.fft(re, im)
+                    for (b in 0 until bandCount) {
+                        var k = loBin[b]
+                        val hi = hiBin[b]
+                        var sum = 0f
+                        var cnt = 0
+                        while (k <= hi) {
+                            sum += sqrt(re[k] * re[k] + im[k] * im[k])
+                            cnt++
+                            k++
+                        }
+                        val mean = if (cnt > 0) sum / cnt else 0f
+                        val norm = mean / FFT_SIZE * 4f
+                        val db = 20f * log10(norm + 1e-7f)
+                        target[b] = ((db - DB_FLOOR) / (DB_CEIL - DB_FLOOR)).coerceIn(0f, 1f)
+                    }
+                } else {
+                    for (b in 0 until bandCount) target[b] = 0f
+                }
+
+                var visible = hasNewAudio
+                for (b in 0 until bandCount) {
+                    val t = target[b]
+                    levels[b] += (t - levels[b]) * (if (t > levels[b]) ATTACK else DECAY)
+                    if (levels[b] > SILENCE_EPSILON) visible = true
+                }
+
+                if (visible) {
+                    _spectrum.value = levels.copyOf()
+                    emittedSilentFrame = false
+                    delay(ACTIVE_FRAME_MS)
+                } else {
+                    if (!emittedSilentFrame) {
+                        for (b in 0 until bandCount) levels[b] = 0f
+                        _spectrum.value = levels.copyOf()
+                        emittedSilentFrame = true
+                    }
+                    delay(IDLE_FRAME_MS)
+                }
             }
         }
     }
@@ -121,13 +166,14 @@ class SpectrumAnalyzer(
 
     companion object {
         private const val FFT_SIZE = 2048
-        private const val RING_SIZE = 8192 // 2^n, 약 170ms@48k
+        private const val RING_SIZE = 8192
         private const val RING_MASK = (RING_SIZE - 1).toLong()
         private const val DEFAULT_BANDS = 48
-        private const val FRAME_MS = 22L // ~45fps
+        private const val ACTIVE_FRAME_MS = 50L
+        private const val IDLE_FRAME_MS = 160L
+        private const val SILENCE_EPSILON = 0.003f
         private const val ATTACK = 0.5f
         private const val DECAY = 0.12f
-        // dB 매핑 범위(디바이스 튜닝 가능): FLOOR=바닥, CEIL=꼭대기.
         private const val DB_FLOOR = -66f
         private const val DB_CEIL = -12f
     }
@@ -136,7 +182,6 @@ class SpectrumAnalyzer(
 internal object SpectrumAnalyzerMath {
     const val FFT_SIZE = 2048
 
-    /** 밴드 b의 FFT 빈 범위(lo..hi)를 로그 간격(40Hz~min(Nyquist,18k))으로 계산. */
     fun computeBandEdges(lo: IntArray, hi: IntArray, sampleRate: Int, fftSize: Int = FFT_SIZE) {
         require(lo.size == hi.size) { "lo/hi size mismatch" }
         require(sampleRate > 0) { "sampleRate must be positive" }
@@ -157,7 +202,6 @@ internal object SpectrumAnalyzerMath {
         }
     }
 
-    /** In-place iterative radix-2 Cooley-Tukey FFT(무할당). [re]/[im] 길이는 2의 거듭제곱. */
     fun fft(re: FloatArray, im: FloatArray) {
         require(re.size == im.size) { "real/imag size mismatch" }
         val n = re.size
@@ -165,27 +209,39 @@ internal object SpectrumAnalyzerMath {
         var j = 0
         for (i in 1 until n) {
             var bit = n shr 1
-            while (j and bit != 0) { j = j xor bit; bit = bit shr 1 }
+            while (j and bit != 0) {
+                j = j xor bit
+                bit = bit shr 1
+            }
             j = j or bit
             if (i < j) {
-                val tr = re[i]; re[i] = re[j]; re[j] = tr
-                val ti = im[i]; im[i] = im[j]; im[j] = ti
+                val tr = re[i]
+                re[i] = re[j]
+                re[j] = tr
+                val ti = im[i]
+                im[i] = im[j]
+                im[j] = ti
             }
         }
         var len = 2
         while (len <= n) {
             val ang = -2.0 * Math.PI / len
-            val wRe = cos(ang).toFloat(); val wIm = sin(ang).toFloat()
+            val wRe = cos(ang).toFloat()
+            val wIm = sin(ang).toFloat()
             val half = len shr 1
             var i = 0
             while (i < n) {
-                var curRe = 1f; var curIm = 0f
+                var curRe = 1f
+                var curIm = 0f
                 for (k in 0 until half) {
-                    val a = i + k; val bIdx = a + half
+                    val a = i + k
+                    val bIdx = a + half
                     val tRe = re[bIdx] * curRe - im[bIdx] * curIm
                     val tIm = re[bIdx] * curIm + im[bIdx] * curRe
-                    re[bIdx] = re[a] - tRe; im[bIdx] = im[a] - tIm
-                    re[a] += tRe; im[a] += tIm
+                    re[bIdx] = re[a] - tRe
+                    im[bIdx] = im[a] - tIm
+                    re[a] += tRe
+                    im[a] += tIm
                     val nRe = curRe * wRe - curIm * wIm
                     curIm = curRe * wIm + curIm * wRe
                     curRe = nRe
