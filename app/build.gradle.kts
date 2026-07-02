@@ -1,11 +1,30 @@
 // app module — Compose-based MVP entrypoint that wires :audio-engine and :autoeq-data
 // into the AudioTrack Float32 loop chosen as the Phase 0 MVP pipeline.
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.serialization)
 }
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.isFile) file.inputStream().use { load(it) }
+}
+
+fun releaseSigningValue(name: String): String? =
+    localProperties.getProperty(name)
+        ?: providers.gradleProperty(name).orNull
+        ?: System.getenv(name)
+
+val hasReleaseSigning = listOf(
+    "AURALTUNE_RELEASE_STORE_FILE",
+    "AURALTUNE_RELEASE_STORE_PASSWORD",
+    "AURALTUNE_RELEASE_KEY_ALIAS",
+    "AURALTUNE_RELEASE_KEY_PASSWORD",
+).all { !releaseSigningValue(it).isNullOrBlank() }
 
 android {
     namespace = "com.coreline.auraltune"
@@ -37,6 +56,17 @@ android {
         noCompress += "m4a"
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = rootProject.file(releaseSigningValue("AURALTUNE_RELEASE_STORE_FILE")!!)
+                storePassword = releaseSigningValue("AURALTUNE_RELEASE_STORE_PASSWORD")
+                keyAlias = releaseSigningValue("AURALTUNE_RELEASE_KEY_ALIAS")
+                keyPassword = releaseSigningValue("AURALTUNE_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isMinifyEnabled = false
@@ -45,6 +75,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
