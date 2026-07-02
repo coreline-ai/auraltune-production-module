@@ -379,6 +379,9 @@ private fun PlayerScreen(
     // 재생곡 커버에서 뽑은 강조색 — 슬라이더·트랜스포트에 반영(곡마다 변함, 없으면 테마색).
     val accent = rememberArtworkAccent(state.artwork, MaterialTheme.colorScheme.secondaryContainer)
     val onAccent = contentColorOn(accent)
+    // 재생곡의 임베디드 제목(태그) — 파일명(상단)과 가수·앨범(하단) 사이 줄. 캐시에서 추출(태그 없으면 null).
+    val currentTitle = state.queue.getOrNull(state.currentIndex)?.uri
+        ?.let { rememberTrackMeta(vm.albumArtCache, it).title }
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(contentPadding),
         state = listState,
@@ -411,6 +414,16 @@ private fun PlayerScreen(
                                 style = MaterialTheme.typography.titleMedium,
                                 maxLines = 2,
                             )
+                            // 파일명과 가수·앨범 사이: 곡 제목(임베디드 태그). 태그 없거나 파일명과 같으면 생략.
+                            currentTitle?.takeIf { it != state.title }?.let { songTitle ->
+                                Text(
+                                    text = songTitle,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             // 파일명 아래 가수 · 앨범(태그). 없으면 줄 숨김, 길면 말줄임.
                             formatArtistAlbum(state.artist, state.album)?.let { sub ->
                                 Text(

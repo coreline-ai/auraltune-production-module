@@ -379,11 +379,9 @@ class MusicPlayerController(
     private fun publish(playbackError: String? = _state.value.playbackError) {
         val c = controller ?: return
         val idx = c.currentMediaItemIndex
-        // 결정 ①: 상단 줄은 파일명 우선(큐와 통일), 파일명 없을 때만 태그 제목 폴백.
-        val title = queue.getOrNull(idx)?.title
-            ?: c.mediaMetadata.title?.toString()
-            ?: ""
         val meta = c.mediaMetadata
+        // 결정 ①: 상단 줄은 파일명 우선(큐와 통일), 파일명 없을 때만 태그 제목 폴백.
+        val title = queue.getOrNull(idx)?.title ?: meta.title?.toString() ?: ""
         val artist = meta.artist?.toString()?.ifBlank { null }
         val album = meta.albumTitle?.toString()?.ifBlank { null }
         val fmt = telemetry.format.value

@@ -12,9 +12,10 @@ import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
-/** Cover + tag metadata for a queue row (any field may be null when absent). */
+/** Cover + tag metadata for a track (any field may be null when absent). */
 data class TrackMeta(
     val artwork: Bitmap? = null,
+    val title: String? = null,
     val artist: String? = null,
     val album: String? = null,
 ) {
@@ -44,15 +45,16 @@ class AlbumArtCache(context: Context, private val maxEntries: Int = 64) {
         return meta
     }
 
-    /** One MediaMetadataRetriever open → embedded art (downscaled) + artist + album. */
+    /** One MediaMetadataRetriever open → embedded art (downscaled) + title + artist + album. */
     private fun extract(uri: Uri): TrackMeta = runCatching {
         val retriever = MediaMetadataRetriever()
         try {
             retriever.setDataSourceCompat(appContext, uri)
             val art = retriever.embeddedPicture?.let { ArtworkDecoder.decode(it, ROW_MAX_PX) }
+            val title = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_TITLE)?.ifBlank { null }
             val artist = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ARTIST)?.ifBlank { null }
             val album = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_ALBUM)?.ifBlank { null }
-            TrackMeta(art, artist, album)
+            TrackMeta(art, title, artist, album)
         } finally {
             retriever.release()
         }
