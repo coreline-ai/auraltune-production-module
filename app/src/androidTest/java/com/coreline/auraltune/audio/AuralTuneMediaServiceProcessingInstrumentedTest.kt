@@ -37,7 +37,7 @@ class AuralTuneMediaServiceProcessingInstrumentedTest {
         writeWav16Stereo(wav, durationMs = 5_000)
 
         runBlocking { settings.setPlaybackProcessingMode(PlaybackProcessingMode.AURAL_TUNE) }
-        processing.setTargetSpecs(targetSpecs())
+        processing.setTargetSpecs(targetSpecs(), headroomDb = -4f)
 
         val token = SessionToken(context, ComponentName(context, AuralTuneMediaService::class.java))
         val future = MediaController.Builder(context, token).buildAsync()
@@ -58,7 +58,7 @@ class AuralTuneMediaServiceProcessingInstrumentedTest {
             assertTrue("AuralTune mode must keep native engine enabled", processing.useNativeEngine())
 
             runBlocking { settings.setPlaybackProcessingMode(PlaybackProcessingMode.ANDROID_DYNAMICS) }
-            processing.setTargetSpecs(targetSpecs())
+            processing.setTargetSpecs(targetSpecs(), headroomDb = -4f)
             waitUntil("Android mode should disable native engine") {
                 processing.mode.value == PlaybackProcessingMode.ANDROID_DYNAMICS && !processing.useNativeEngine()
             }
@@ -70,6 +70,7 @@ class AuralTuneMediaServiceProcessingInstrumentedTest {
             val status = processing.dynamicsStatus.value
             assertEquals("DynamicsProcessing", status.backend)
             assertEquals(12, status.bandCount)
+            assertEquals(-4f, status.headroomDb, 0.0001f)
             val pos = onMain { controller.currentPosition }
             waitUntil("Android EQ playback position should continue advancing") {
                 onMain { controller.currentPosition > pos + 250L }

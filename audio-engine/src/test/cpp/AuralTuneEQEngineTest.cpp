@@ -391,6 +391,55 @@ void testAutoEqPreampToggleGlides() {
     std::printf("PASS testAutoEqPreampToggleGlides\n");
 }
 
+// Test 12: Manual EQ enable/disable should wet/dry-ramp like AutoEQ, but with a
+// short user-control fade. A constant signal through a strong low shelf makes
+// the transition visible without depending on high-frequency phase details.
+void testManualEqToggleGlides() {
+    constexpr int kShortFrames = 64;
+    constexpr int kSettleFrames = 4096;
+
+    AuralTuneEQEngine eng(48000.0);
+    const float freqs[1] = {120.0f};
+    const float gains[1] = {12.0f};
+    const float qs[1] = {0.7f};
+    const int types[1] = {static_cast<int>(EqFilterType::LowShelf)};
+    assert(eng.updateManualEq(freqs, gains, qs, types, 1) == 0);
+
+    std::vector<float> buf(kShortFrames * 2, 0.25f);
+    assert(eng.process(buf.data(), kShortFrames) == 0); // initialize manualMix_ at bypass
+    assert(std::fabs(buf[0] - 0.25f) < 1.0e-6f);
+
+    eng.setManualEqEnabled(true);
+    std::fill(buf.begin(), buf.end(), 0.25f);
+    assert(eng.process(buf.data(), kShortFrames) == 0);
+
+    const float fadeInFirst = buf[0];
+    const float fadeInLast = buf[(kShortFrames - 1) * 2];
+    assert(std::fabs(fadeInFirst - 0.25f) < 1.0e-5f);
+    assert(fadeInLast > fadeInFirst);
+
+    std::vector<float> settle(kSettleFrames * 2, 0.25f);
+    assert(eng.process(settle.data(), kSettleFrames) == 0);
+    const float fullWet = settle[(kSettleFrames - 1) * 2];
+    assert(fullWet > 0.4f);
+
+    eng.setManualEqEnabled(false);
+    std::fill(buf.begin(), buf.end(), 0.25f);
+    assert(eng.process(buf.data(), kShortFrames) == 0);
+
+    const float fadeOutFirst = buf[0];
+    const float fadeOutLast = buf[(kShortFrames - 1) * 2];
+    assert(fadeOutFirst > 0.25f);
+    assert(fadeOutLast < fadeOutFirst);
+    assert(fadeOutLast > 0.25f);
+
+    std::fill(settle.begin(), settle.end(), 0.25f);
+    assert(eng.process(settle.data(), kSettleFrames) == 0);
+    assert(std::fabs(settle[(kSettleFrames - 1) * 2] - 0.25f) < 1.0e-4f);
+
+    std::printf("PASS testManualEqToggleGlides\n");
+}
+
 int main() {
     testUnityBypass();
     testStaleFilterReset();
@@ -403,6 +452,7 @@ int main() {
     testEnableTogglePublishesSnapshot();
     testRapidSwitchingClickFree();
     testAutoEqPreampToggleGlides();
+    testManualEqToggleGlides();
     std::printf("\nAll native tests passed.\n");
     return 0;
 }

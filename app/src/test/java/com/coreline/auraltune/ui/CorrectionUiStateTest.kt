@@ -2,6 +2,7 @@ package com.coreline.auraltune.ui
 
 import com.coreline.autoeq.model.AutoEqProfile
 import com.coreline.autoeq.model.AutoEqSource
+import com.coreline.auraltune.data.PlaybackProcessingMode
 import com.coreline.auraltune.data.SettingsStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -59,6 +60,46 @@ class CorrectionUiStateTest {
                 correctionProvider = SettingsStore.PROVIDER_OPRA,
                 listenMode = ListenMode.USER,
             ),
+        )
+    }
+
+    @Test
+    fun androidDynamicsHeadroom_isOnlyAppliedInUserMode() {
+        assertEquals(
+            0f,
+            androidDynamicsHeadroomDb(
+                profilePreampDb = -6.5f,
+                listenMode = ListenMode.ORIGINAL,
+                processingMode = PlaybackProcessingMode.ANDROID_DYNAMICS,
+            ),
+            0.0001f,
+        )
+        assertEquals(
+            0f,
+            androidDynamicsHeadroomDb(
+                profilePreampDb = -6.5f,
+                listenMode = ListenMode.AUTOEQ,
+                processingMode = PlaybackProcessingMode.ANDROID_DYNAMICS,
+            ),
+            0.0001f,
+        )
+        assertEquals(
+            -6.5f,
+            androidDynamicsHeadroomDb(
+                profilePreampDb = -6.5f,
+                listenMode = ListenMode.USER,
+                processingMode = PlaybackProcessingMode.ANDROID_DYNAMICS,
+            ),
+            0.0001f,
+        )
+        assertEquals(
+            0f,
+            androidDynamicsHeadroomDb(
+                profilePreampDb = -6.5f,
+                listenMode = ListenMode.USER,
+                processingMode = PlaybackProcessingMode.AURAL_TUNE,
+            ),
+            0.0001f,
         )
     }
 }

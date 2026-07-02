@@ -39,6 +39,7 @@ class PlayerDynamicsEqInstrumentedTest {
                     BiquadSpec(BiquadType.PEAKING, 2500.0, -2.0, 1.1),
                     BiquadSpec(BiquadType.HIGH_SHELF, 8500.0, 1.5, 0.7),
                 ),
+                headroomDb = -4f,
             )
             controller.setMode(PlaybackProcessingMode.ANDROID_DYNAMICS)
 
@@ -47,6 +48,7 @@ class PlayerDynamicsEqInstrumentedTest {
                 "DynamicsProcessing should attach, latest=${statuses.lastOrNull()}",
                 attached?.backend == "DynamicsProcessing" && attached.bandCount == 12,
             )
+            assertEquals(-4f, attached!!.headroomDb, 0.0001f)
 
             val chunk = sinePcm16(sampleRate, durationMs = 100)
             val prime = track.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)

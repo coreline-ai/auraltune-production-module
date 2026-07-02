@@ -380,10 +380,19 @@ class AutoEqViewModel(
         }
 
         viewModelScope.launch {
-            combine(activeProfile, listenMode) { profile, mode ->
-                if (mode == ListenMode.ORIGINAL) emptyList()
-                else profile?.filters.orEmpty().map { it.toBiquadSpec() }
-            }.collect { specs -> locator.playbackProcessingState.setTargetSpecs(specs) }
+            combine(activeProfile, listenMode, playbackProcessingMode) { profile, mode, processingMode ->
+                if (mode == ListenMode.ORIGINAL || profile == null) {
+                    emptyList<BiquadSpec>() to 0f
+                } else {
+                    profile.filters.map { it.toBiquadSpec() } to androidDynamicsHeadroomDb(
+                        profilePreampDb = profile.preampDB,
+                        listenMode = mode,
+                        processingMode = processingMode,
+                    )
+                }
+            }.collect { (specs, headroomDb) ->
+                locator.playbackProcessingState.setTargetSpecs(specs, headroomDb)
+            }
         }
 
         // P0-3: ALL writes to engine.updateAutoEq / engine.clearAutoEq go through
@@ -1389,3 +1398,14 @@ enum class ListenMode(val key: String) {
         fun fromKey(key: String): ListenMode = entries.firstOrNull { it.key == key } ?: USER
     }
 }
+
+internal fun androidDynamicsHeadroomDb(
+    profilePreampDb: Float,
+    listenMode: ListenMode,
+    processingMode: PlaybackProcessingMode,
+): Float =
+    if (processingMode == PlaybackProcessingMode.ANDROID_DYNAMICS && listenMode == ListenMode.USER) {
+        profilePreampDb
+    } else {
+        0f
+    }

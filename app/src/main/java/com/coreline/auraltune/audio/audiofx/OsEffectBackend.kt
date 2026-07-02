@@ -28,8 +28,8 @@ interface OsEffectBackend {
     /** Center frequencies (Hz) of this backend's bands — feed these to [AutoEqApprox.fit]. */
     fun bandCenters(): DoubleArray
 
-    /** Push per-band gains (dB). Returns false on any OS error (caller releases). */
-    fun apply(bands: List<AutoEqApprox.BandGain>): Boolean
+    /** Push per-band gains and optional input gain (dB). Returns false on any OS error. */
+    fun apply(bands: List<AutoEqApprox.BandGain>, inputGainDb: Float = 0f): Boolean
 
     fun release()
 
@@ -87,7 +87,7 @@ private class EqualizerBackend(audioSessionId: Int) : OsEffectBackend {
     override fun bandCenters(): DoubleArray =
         DoubleArray(numBands.toInt()) { eq.getCenterFreq(it.toShort()) / 1000.0 } // mHz → Hz
 
-    override fun apply(bands: List<AutoEqApprox.BandGain>): Boolean = runCatching {
+    override fun apply(bands: List<AutoEqApprox.BandGain>, inputGainDb: Float): Boolean = runCatching {
         val n = minOf(numBands.toInt(), bands.size)
         for (i in 0 until n) {
             val mb = (bands[i].gainDb * 100.0).toInt().toShort() // dB → millibels
@@ -123,7 +123,10 @@ private class DynamicsProcessingBackend(audioSessionId: Int) : OsEffectBackend {
             /* mbcInUse = */ false, 0,
             /* postEqInUse = */ true, bandCount,
             /* limiterInUse = */ false,
-        ).setPostEqAllChannelsTo(eqCfg).build()
+        )
+            .setInputGainAllChannelsTo(0f)
+            .setPostEqAllChannelsTo(eqCfg)
+            .build()
         val d = DynamicsProcessing(EFFECT_PRIORITY, audioSessionId, config)
         // Release if enabling throws (don't leak the native effect).
         try {
@@ -137,7 +140,7 @@ private class DynamicsProcessingBackend(audioSessionId: Int) : OsEffectBackend {
 
     override fun bandCenters(): DoubleArray = centers.copyOf()
 
-    override fun apply(bands: List<AutoEqApprox.BandGain>): Boolean = runCatching {
+    override fun apply(bands: List<AutoEqApprox.BandGain>, inputGainDb: Float): Boolean = runCatching {
         val eqCfg = dp.getPostEqByChannelIndex(0)
         val n = minOf(bandCount, bands.size)
         for (i in 0 until n) {
@@ -146,6 +149,7 @@ private class DynamicsProcessingBackend(audioSessionId: Int) : OsEffectBackend {
                 gain = bands[i].gainDb.toFloat()
             }
         }
+        dp.setInputGainAllChannelsTo(inputGainDb)
         dp.setPostEqAllChannelsTo(eqCfg) // applies to all channels in one call
         true
     }.getOrElse { false }

@@ -28,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
@@ -116,7 +117,11 @@ class AuralTuneMediaService : MediaSessionService() {
             processingState.mode.collectLatest { controller.setMode(it) }
         }
         serviceScope.launch {
-            processingState.targetSpecs.collectLatest { controller.setTargetSpecs(it) }
+            combine(
+                processingState.targetSpecs,
+                processingState.targetHeadroomDb,
+            ) { specs, headroomDb -> specs to headroomDb }
+                .collectLatest { (specs, headroomDb) -> controller.setTargetSpecs(specs, headroomDb) }
         }
         mediaSession = MediaSession.Builder(this, player).build()
     }

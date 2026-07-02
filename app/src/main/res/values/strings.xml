@@ -32,12 +32,13 @@
     <string name="player_mode_original">원음</string>
     <string name="player_mode_eq_applied">EQ 적용</string>
     <string name="player_mode_custom">커스텀</string>
+    <string name="player_mode_preamp_applied">프리앰프 적용</string>
     <string name="player_preamp">프리앰프</string>
     <string name="player_processing_label">처리 방식</string>
     <string name="player_processing_auraltune">AuralTune</string>
     <string name="player_processing_android">Android EQ</string>
     <string name="player_processing_android_ready">Android EQ 세션 대기</string>
-    <string name="player_processing_android_status_format">%1$s · %2$d밴드 · 최대오차 %3$.1f dB</string>
+    <string name="player_processing_android_status_format">%1$s · %2$d밴드 · 헤드룸 %3$.1f dB · 최대오차 %4$.1f dB</string>
     <string name="player_queue_item_idle">재생목록 항목</string>
     <string name="player_queue_item_selected">현재 선택된 곡</string>
     <string name="player_queue_item_playing">현재 재생 중</string>
@@ -59,7 +60,7 @@
     <!-- Search -->
     <string name="search_placeholder">헤드폰 검색…</string>
     <string name="no_results">검색 결과가 없습니다</string>
-    <string name="search_prompt">모델명을 입력하거나 위의 빠른 선택에서 고르세요</string>
+    <string name="search_prompt">모델명 입력 또는 빠른 선택</string>
     <string name="clear_search">검색어 지우기</string>
     <string name="profile_picker_expand">프로파일 목록 열기</string>
     <string name="profile_picker_title">프로파일 선택</string>
@@ -251,7 +252,7 @@
     <string name="opra_profile_picker_title">OPRA 프로파일 선택</string>
     <string name="opra_profile_picker_placeholder">최근 OPRA 프로파일에서 선택</string>
     <string name="opra_empty_loading">OPRA 데이터를 불러오는 중…</string>
-    <string name="opra_empty_prompt">OPRA 헤드폰을 검색하거나 ‘OPRA 데이터 갱신’을 누르세요</string>
+    <string name="opra_empty_prompt">OPRA 모델명 입력 또는 데이터 갱신</string>
     <string name="opra_unsupported_suffix"> · 적용 불가</string>
 
     <!-- OPRA profile detail sheet -->

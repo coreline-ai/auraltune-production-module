@@ -50,9 +50,14 @@ AuralTuneEQEngine::AuralTuneEQEngine(double sampleRate)
     for (auto& c : boot->autoEqCoeffs) c = BiquadCoeffs::unity();
     for (auto& c : boot->loudnessCompCoeffs) c = BiquadCoeffs::unity();
     boot->generation = 0;
+    boot->manualMixStep = computeManualMixStep(currentRate_);
     boot->autoEqMixStep = computeAutoEqMixStep(currentRate_);
     boot->autoEqPreampRampFrames = computeAutoEqPreampRampFrames(currentRate_);
     activeSnapshot_.store(boot, std::memory_order_release);
+
+    // Pre-size the Manual EQ crossfade dry-copy buffer so the audio thread
+    // never allocates during a custom-EQ enable/disable transition.
+    manualDryScratch_.resize(static_cast<size_t>(kMaxProcessFrames) * 2u);
 
     // Pre-size the AutoEQ crossfade dry-copy buffer so the audio thread never
     // allocates during a transition (kMaxProcessFrames stereo frames).
@@ -68,11 +73,25 @@ float AuralTuneEQEngine::computeAutoEqMixStep(double rate) {
     return static_cast<float>(1.0 / (static_cast<double>(kAutoEqRampSeconds) * r));
 }
 
+float AuralTuneEQEngine::computeManualMixStep(double rate) {
+    const double r = (rate > 0.0) ? rate : 48000.0;
+    return static_cast<float>(1.0 / (static_cast<double>(kManualEqRampSeconds) * r));
+}
+
 int AuralTuneEQEngine::computeAutoEqPreampRampFrames(double rate) {
     const double r = (rate > 0.0) ? rate : 48000.0;
     const int frames = static_cast<int>(
         static_cast<double>(kAutoEqPreampRampSeconds) * r + 0.5);
     return frames > 1 ? frames : 1;
+}
+
+void AuralTuneEQEngine::applyManualCascade(const EngineSnapshot* s,
+                                           float* pcm, int numFrames) noexcept {
+    const int n = (s->manualCount < kMaxManualFilters)
+                      ? s->manualCount : kMaxManualFilters;
+    for (int i = 0; i < n; ++i) {
+        manualChain_[i].processStereoInterleaved(s->manualCoeffs[i], pcm, numFrames);
+    }
 }
 
 void AuralTuneEQEngine::applyAutoEqCascade(const EngineSnapshot* s,
@@ -395,8 +414,9 @@ void AuralTuneEQEngine::writeAllCoeffsInto(EngineSnapshot& dst) const {
         }
     }
 
-    // AutoEQ crossfade ramp step depends only on the sample rate — refresh it
-    // here so a rate change keeps the 0.5 s fade duration correct.
+    // Crossfade ramp steps depend only on the sample rate — refresh them here
+    // so a rate change keeps the fade durations correct.
+    dst.manualMixStep = computeManualMixStep(currentRate_);
     dst.autoEqMixStep = computeAutoEqMixStep(currentRate_);
     dst.autoEqPreampRampFrames = computeAutoEqPreampRampFrames(currentRate_);
 }
@@ -773,12 +793,45 @@ int AuralTuneEQEngine::process(float* pcm, int numFrames) noexcept {
         lastSeenGeneration_ = s->generation;
     }
 
-    // 1. Manual cascade.
-    if (s->manualOn) {
-        const int n = (s->manualCount < kMaxManualFilters)
-                          ? s->manualCount : kMaxManualFilters;
-        for (int i = 0; i < n; ++i) {
-            manualChain_[i].processStereoInterleaved(s->manualCoeffs[i], pcm, numFrames);
+    // 1. Manual cascade with a short wet/dry ramp on enable/disable. This
+    // prevents "EQ applied" <-> "custom" button transitions from snapping the
+    // whole user EQ chain into the signal path in one buffer.
+    {
+        const double target = s->manualOn ? 1.0 : 0.0;
+        const double step = static_cast<double>(s->manualMixStep);
+        const int total = numFrames * 2;
+
+        // First callback ever: snap to current target, matching AutoEQ startup
+        // semantics and avoiding a fade before any audio is heard.
+        if (!manualMixInit_) {
+            manualMix_ = target;
+            manualMixInit_ = true;
+        }
+
+        if (manualMix_ >= 1.0 && target >= 1.0) {
+            manualMix_ = 1.0;
+            applyManualCascade(s, pcm, numFrames);
+        } else if (manualMix_ <= 0.0 && target <= 0.0) {
+            manualMix_ = 0.0;
+        } else {
+            if (manualMix_ <= 0.0 && target > 0.0) {
+                for (auto& f : manualChain_) f.reset();
+            }
+            std::memcpy(manualDryScratch_.data(), pcm,
+                        static_cast<size_t>(total) * sizeof(float));
+            applyManualCascade(s, pcm, numFrames);
+
+            double mix = manualMix_;
+            for (int i = 0; i < numFrames; ++i) {
+                const float m = static_cast<float>(mix);
+                const int l = 2 * i;
+                const int r = l + 1;
+                pcm[l] = manualDryScratch_[l] + m * (pcm[l] - manualDryScratch_[l]);
+                pcm[r] = manualDryScratch_[r] + m * (pcm[r] - manualDryScratch_[r]);
+                if (mix < target)      { mix += step; if (mix > target) mix = target; }
+                else if (mix > target) { mix -= step; if (mix < target) mix = target; }
+            }
+            manualMix_ = mix;
         }
     }
 

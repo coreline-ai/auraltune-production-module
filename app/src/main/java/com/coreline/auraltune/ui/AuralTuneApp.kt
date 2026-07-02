@@ -396,7 +396,12 @@ private fun PlayerScreen(
                         formatLabel = state.audioFormatLabel(),
                         accent = accent,
                     )
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(8.dp))
+                    PlayerCorrectionStatusStrip(
+                        correctionSource = correctionSource,
+                        correctionName = correctionName,
+                    )
+                    Spacer(Modifier.height(12.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         AlbumArtThumbnail(artwork = state.artwork, modifier = Modifier.size(64.dp))
                         Spacer(Modifier.width(12.dp))
@@ -415,22 +420,6 @@ private fun PlayerScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
-                            }
-                            // 재생 중인 음원에 걸린 보정(소스 배지 + 프로파일명). 보정 없으면 숨김.
-                            if (correctionSource != null) {
-                                Spacer(Modifier.height(8.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SourceBadge(correctionSource)
-                                    correctionName?.let {
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            text = it,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                }
                             }
                         }
                     }
@@ -624,6 +613,57 @@ private fun SpectrumVisualizer(
     }
 }
 
+@Composable
+private fun PlayerCorrectionStatusStrip(
+    correctionSource: String?,
+    correctionName: String?,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(32.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .clip(MaterialTheme.shapes.small)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f))
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            if (correctionSource != null) {
+                SourceBadge(correctionSource)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = correctionName ?: stringResource(R.string.legend_profile),
+                    modifier = Modifier.weight(1f, fill = false),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Tune,
+                    contentDescription = null,
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = stringResource(R.string.no_correction_active),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 private fun PlaybackUiState.audioFormatLabel(): String? {
     val bitDepth = audioBitDepth ?: return null
     val sampleRate = audioSampleRateHz ?: return null
@@ -705,11 +745,18 @@ private fun PlayerCorrectionControls(
                 )
                 GainLimitButton(
                     label = stringResource(R.string.player_mode_eq_applied),
-                    selected = mode == ListenMode.AUTOEQ || (androidMode && mode == ListenMode.USER),
+                    selected = mode == ListenMode.AUTOEQ,
                     onClick = { onModeSelect(ListenMode.AUTOEQ) },
                     modifier = Modifier.weight(1f),
                 )
-                if (!androidMode) {
+                if (androidMode) {
+                    GainLimitButton(
+                        label = stringResource(R.string.player_mode_preamp_applied),
+                        selected = mode == ListenMode.USER,
+                        onClick = { onModeSelect(ListenMode.USER) },
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
                     GainLimitButton(
                         label = stringResource(R.string.player_mode_custom),
                         selected = mode == ListenMode.USER,
@@ -730,6 +777,7 @@ private fun PlayerCorrectionControls(
                         R.string.player_processing_android_status_format,
                         dynamicsStatus.backend ?: stringResource(R.string.player_processing_android),
                         dynamicsStatus.bandCount,
+                        dynamicsStatus.headroomDb,
                         dynamicsStatus.maxErrorDb ?: 0.0,
                     )
                     dynamicsStatus.message != null -> dynamicsStatus.message
@@ -759,28 +807,13 @@ private fun PlayerPreampButton(
         onClick = onClick,
         modifier = modifier.height(38.dp),
         shape = MaterialTheme.shapes.small,
-        border = BorderStroke(
-            if (enabled) 2.dp else 1.dp,
-            if (enabled) MaterialTheme.colorScheme.secondaryContainer
-            else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
-        ),
-        colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = if (enabled) {
-                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.22f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
-            },
-            contentColor = if (enabled) {
-                MaterialTheme.colorScheme.secondaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        ),
+        border = eqButtonBorder(enabled),
+        colors = if (enabled) eqSelectedButtonColors() else eqOutlinedButtonColors(),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
     ) {
         Text(
             text = stringResource(R.string.player_preamp),
-            style = MaterialTheme.typography.labelSmall,
+            style = if (enabled) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelSmall,
             fontWeight = if (enabled) FontWeight.Bold else FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1234,8 +1267,13 @@ private fun CorrectionScreen(
                 CatalogState.Idle -> item { EmptyStateMessage(stringResource(R.string.catalog_offline)) }
                 is CatalogState.Loaded -> {
                     if (results.entries.isEmpty()) {
-                        val emptyMsg = if (query.isBlank()) R.string.search_prompt else R.string.no_results
-                        item { EmptyStateMessage(stringResource(emptyMsg)) }
+                        item {
+                            if (query.isBlank()) {
+                                CompactSearchHint(stringResource(R.string.search_prompt))
+                            } else {
+                                EmptyStateMessage(stringResource(R.string.no_results))
+                            }
+                        }
                     } else {
                         items(results.entries, key = { it.id }) { entry ->
                             CatalogEntryRow(
@@ -1319,10 +1357,14 @@ private fun CorrectionScreen(
             }
             if (opraResults.isEmpty()) {
                 item {
-                    EmptyStateMessage(
-                        if (opraRefreshing) stringResource(R.string.opra_empty_loading)
-                        else stringResource(R.string.opra_empty_prompt),
-                    )
+                    if (!opraRefreshing && opraQuery.trim().length < 2) {
+                        CompactSearchHint(stringResource(R.string.opra_empty_prompt))
+                    } else {
+                        EmptyStateMessage(
+                            if (opraRefreshing) stringResource(R.string.opra_empty_loading)
+                            else stringResource(R.string.no_results),
+                        )
+                    }
                 }
             } else {
                 items(opraResults, key = { it.id }) { entry ->
@@ -1463,6 +1505,18 @@ private fun CorrectionScreen(
 private fun formatTime(ms: Long): String {
     val totalSec = (ms / 1000).coerceAtLeast(0)
     return "%d:%02d".format(totalSec / 60, totalSec % 60)
+}
+
+@Composable
+private fun CompactSearchHint(message: String) {
+    Text(
+        text = message,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
 }
 
 /** One OPRA catalog row: product + vendor • author + license. Unsupported rows are dimmed/disabled. */

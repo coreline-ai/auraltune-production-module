@@ -91,6 +91,10 @@ public:
     // remove clicks/zippers from direct gain changes.
     static constexpr float kAutoEqPreampRampSeconds = 0.03f;
 
+    // Manual EQ enable/disable smoothing: short wet/dry crossfade for the
+    // user EQ chain so "EQ applied" <-> "custom" transitions do not click.
+    static constexpr float kManualEqRampSeconds = 0.05f;
+
     // Retire grace — minimum lifetime of a published snapshot after a newer
     // one has taken over. 500 ms is comfortably larger than any audio
     // callback (typical 5-20 ms, worst-case ~100 ms) and matches the Swift
@@ -291,6 +295,9 @@ private:
         // Frames used to glide direct preamp gain changes.
         int autoEqPreampRampFrames = 1440; // 30 ms at 48 kHz.
 
+        // Per-frame increment for Manual EQ enable/disable wet/dry ramp.
+        float manualMixStep = 1.0f / (kManualEqRampSeconds * 48000.0f);
+
         // Per-sample (per-frame) increment for the AutoEQ enable/disable mix
         // ramp = 1 / (kAutoEqRampSeconds * sampleRate). Depends only on the rate,
         // so it is set in the constructor + recomputed on sample-rate change and
@@ -347,7 +354,11 @@ private:
 
     // Per-sample mix-ramp increment for the AutoEQ enable/disable crossfade.
     static float computeAutoEqMixStep(double rate);
+    static float computeManualMixStep(double rate);
     static int computeAutoEqPreampRampFrames(double rate);
+
+    // Apply the Manual EQ cascade in place. Audio-thread only.
+    void applyManualCascade(const EngineSnapshot* s, float* pcm, int numFrames) noexcept;
 
     // Apply the AutoEQ stage (preamp gain + biquad cascade) in place. Audio
     // thread only — reads the snapshot, mutates [autoEqChain_] delay state.
@@ -453,6 +464,11 @@ private:
     // genuine enable/disable transitions DURING playback are crossfaded.
     bool autoEqMixInit_ = false;
     std::vector<float> autoEqDryScratch_;  // audio thread only
+
+    // Manual EQ enable/disable crossfade state — audio thread only.
+    double manualMix_ = 0.0;
+    bool manualMixInit_ = false;
+    std::vector<float> manualDryScratch_;  // audio thread only
 
     // AutoEQ preamp gain glide state, audio thread only. First callback snaps
     // to the target; later target changes ramp over kAutoEqPreampRampSeconds.
